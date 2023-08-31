@@ -108,7 +108,7 @@ func (es *EventStore) putJournal(event Event) (*types.Put, error) {
 }
 
 func (es *EventStore) GetSnapshotById(aggregateId AggregateId, converter AggregateConverter) (*AggregateWithSeqNrWithVersion, error) {
-	result, err := es.client.Query(context.TODO(), &dynamodb.QueryInput{
+	result, err := es.client.Query(context.Background(), &dynamodb.QueryInput{
 		TableName:              aws.String(es.snapshotTableName),
 		IndexName:              aws.String(es.snapshotAidIndexName),
 		KeyConditionExpression: aws.String("#aid = :aid AND #seq_nr > :seq_nr"),
@@ -151,7 +151,7 @@ func (es *EventStore) GetSnapshotById(aggregateId AggregateId, converter Aggrega
 }
 
 func (es *EventStore) GetEventsByIdAndSeqNr(aggregateId AggregateId, seqNr uint64, converter EventConverter) ([]Event, error) {
-	result, err := es.client.Query(context.TODO(), &dynamodb.QueryInput{
+	result, err := es.client.Query(context.Background(), &dynamodb.QueryInput{
 		TableName:              aws.String(es.journalTableName),
 		IndexName:              aws.String(es.journalAidIndexName),
 		KeyConditionExpression: aws.String("#aid = :aid AND #seq_nr > :seq_nr"),
@@ -215,7 +215,7 @@ func (es *EventStore) StoreEventWithSnapshot(event Event, version uint64, aggreg
 		if err != nil {
 			return err
 		}
-		_, err = es.client.TransactWriteItems(context.TODO(), &dynamodb.TransactWriteItemsInput{
+		_, err = es.client.TransactWriteItems(context.Background(), &dynamodb.TransactWriteItemsInput{
 			TransactItems: []types.TransactWriteItem{
 				{Update: updateSnapshot},
 				{Put: putJournal},
