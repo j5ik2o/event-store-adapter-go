@@ -9,6 +9,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.21.5
 	github.com/docker/go-connections v0.4.0
 	github.com/oklog/ulid v1.3.1
+	github.com/oklog/ulid/v2 v2.1.0
 	github.com/stretchr/testify v1.8.4
 	github.com/testcontainers/testcontainers-go v0.23.0
 	github.com/testcontainers/testcontainers-go/modules/localstack v0.23.0
