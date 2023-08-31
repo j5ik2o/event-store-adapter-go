@@ -117,10 +117,14 @@ func Test_StoreAndFindById(t *testing.T) {
 	actual, err := repository.FindById(&initial.Id)
 	require.Nil(t, err)
 
-	assert.Equal(t, initial, actual)
+	assert.Equal(t, actual, initial)
 
 	result, err := actual.Rename("test2")
 	require.Nil(t, err)
 
 	err = repository.Store(result.event, actual.Version, nil)
+	actual2, err := repository.FindById(&initial.Id)
+	require.Nil(t, err)
+	assert.Equal(t, actual2.Name, "test2")
+
 }
