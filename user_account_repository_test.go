@@ -107,7 +107,8 @@ func Test_StoreAndFindById(t *testing.T) {
 	require.Nil(t, err)
 	err = createSnapshotTable(t, ctx, dynamodbClient, "snapshot", "snapshot-aid-index")
 	require.Nil(t, err)
-	eventStore := NewEventStoreWithDefaults(dynamodbClient, "journal", "snapshot", "journal-aid-index", "snapshot-aid-index", 1)
+	eventStore, err := NewEventStore(dynamodbClient, "journal", "snapshot", "journal-aid-index", "snapshot-aid-index", 1)
+	require.Nil(t, err)
 
 	// When
 	repository := NewUserAccountRepository(eventStore)

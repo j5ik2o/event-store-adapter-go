@@ -17,31 +17,33 @@ type EventStore struct {
 	snapshotTableName    string
 	journalAidIndexName  string
 	snapshotAidIndexName string
+	shardCount           uint64
 	keyResolver          KeyResolver
 	eventSerializer      EventSerializer
 	snapshotSerializer   SnapshotSerializer
-	shardCount           uint64
 }
 
-func NewEventStoreWithDefaults(
-	client *dynamodb.Client,
-	journalTableName string,
-	snapshotTableName string,
-	journalAidIndexName string,
-	snapshotAidIndexName string,
-	shardCount uint64,
-) *EventStore {
-	return NewEventStore(
-		client,
-		journalTableName,
-		snapshotTableName,
-		journalAidIndexName,
-		snapshotAidIndexName,
-		shardCount,
-		&DefaultKeyResolver{},
-		&JsonEventSerializer{},
-		&JsonSnapshotSerializer{},
-	)
+type EventStoreOption func(*EventStore) error
+
+func WithKeyResolver(keyResolver KeyResolver) EventStoreOption {
+	return func(es *EventStore) error {
+		es.keyResolver = keyResolver
+		return nil
+	}
+}
+
+func WithEventSerializer(eventSerializer EventSerializer) EventStoreOption {
+	return func(es *EventStore) error {
+		es.eventSerializer = eventSerializer
+		return nil
+	}
+}
+
+func WithSnapshotSerializer(snapshotSerializer SnapshotSerializer) EventStoreOption {
+	return func(es *EventStore) error {
+		es.snapshotSerializer = snapshotSerializer
+		return nil
+	}
 }
 
 func NewEventStore(
@@ -51,22 +53,25 @@ func NewEventStore(
 	journalAidIndexName string,
 	snapshotAidIndexName string,
 	shardCount uint64,
-	keyResolver KeyResolver,
-	eventSerializer EventSerializer,
-	snapshotSerializer SnapshotSerializer,
-) *EventStore {
-	return &EventStore{
+	options ...EventStoreOption,
+) (*EventStore, error) {
+	es := &EventStore{
 		client,
 		journalTableName,
 		snapshotTableName,
 		journalAidIndexName,
 		snapshotAidIndexName,
-		keyResolver,
-		eventSerializer,
-		snapshotSerializer,
 		shardCount,
+		&DefaultKeyResolver{},
+		&JsonEventSerializer{},
+		&JsonSnapshotSerializer{},
 	}
-
+	for _, option := range options {
+		if err := option(es); err != nil {
+			return nil, err
+		}
+	}
+	return es, nil
 }
 
 func (es *EventStore) putSnapshot(event Event, aggregate Aggregate) (*types.Put, error) {
