@@ -14,24 +14,58 @@ import (
 type EventStore struct {
 	client               *dynamodb.Client
 	journalTableName     string
-	journalAidIndexName  string
 	snapshotTableName    string
+	journalAidIndexName  string
 	snapshotAidIndexName string
 	keyResolver          KeyResolver
+	eventSerializer      EventSerializer
+	snapshotSerializer   SnapshotSerializer
 	shardCount           uint64
 }
 
-func NewEventStore(client *dynamodb.Client, journalTableName string, snapshotTableName string,
+func NewEventStoreWithDefaults(
+	client *dynamodb.Client,
+	journalTableName string,
+	snapshotTableName string,
 	journalAidIndexName string,
-	snapshotAidIndexName string, keyResolver KeyResolver, shardCount uint64) *EventStore {
+	snapshotAidIndexName string,
+	shardCount uint64,
+) *EventStore {
+	return NewEventStore(
+		client,
+		journalTableName,
+		snapshotTableName,
+		journalAidIndexName,
+		snapshotAidIndexName,
+		shardCount,
+		&DefaultKeyResolver{},
+		&JsonEventSerializer{},
+		&JsonSnapshotSerializer{},
+	)
+}
+
+func NewEventStore(
+	client *dynamodb.Client,
+	journalTableName string,
+	snapshotTableName string,
+	journalAidIndexName string,
+	snapshotAidIndexName string,
+	shardCount uint64,
+	keyResolver KeyResolver,
+	eventSerializer EventSerializer,
+	snapshotSerializer SnapshotSerializer,
+) *EventStore {
 	return &EventStore{
 		client,
 		journalTableName,
-		journalAidIndexName,
 		snapshotTableName,
+		journalAidIndexName,
 		snapshotAidIndexName,
 		keyResolver,
-		shardCount}
+		eventSerializer,
+		snapshotSerializer,
+		shardCount,
+	}
 
 }
 
@@ -76,7 +110,7 @@ func (es *EventStore) updateSnapshot(event Event, version uint64, aggregate Aggr
 		ConditionExpression: aws.String("#version=:before_version"),
 	}
 	if aggregate != nil {
-		payload, err := json.Marshal(aggregate)
+		payload, err := es.snapshotSerializer.Serialize(aggregate)
 		if err != nil {
 			return nil, err
 		}
@@ -92,7 +126,7 @@ func (es *EventStore) updateSnapshot(event Event, version uint64, aggregate Aggr
 func (es *EventStore) putJournal(event Event) (*types.Put, error) {
 	pkey := es.keyResolver.ResolvePkey(event.GetAggregateId().GetTypeName(), event.GetAggregateId().String(), es.shardCount)
 	skey := es.keyResolver.ResolveSkey(event.GetAggregateId().GetTypeName(), event.GetAggregateId().String(), event.GetSeqNr())
-	payload, err := json.Marshal(event)
+	payload, err := es.eventSerializer.Serialize(event)
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +174,7 @@ func (es *EventStore) GetSnapshotById(aggregateId AggregateId, converter Aggrega
 			return nil, err
 		}
 		var aggregateMap map[string]interface{}
-		err = json.Unmarshal([]byte(result.Items[0]["payload"].(*types.AttributeValueMemberS).Value), &aggregateMap)
+		err = es.snapshotSerializer.Deserialize([]byte(result.Items[0]["payload"].(*types.AttributeValueMemberS).Value), &aggregateMap)
 		if err != nil {
 			return nil, err
 		}
@@ -174,12 +208,12 @@ func (es *EventStore) GetEventsByIdAndSeqNr(aggregateId AggregateId, seqNr uint6
 	var events []Event
 	if len(result.Items) > 0 {
 		for _, item := range result.Items {
-			var aggregateMap map[string]interface{}
-			err = json.Unmarshal([]byte(item["payload"].(*types.AttributeValueMemberS).Value), &aggregateMap)
+			var eventMap map[string]interface{}
+			err = es.eventSerializer.Deserialize([]byte(item["payload"].(*types.AttributeValueMemberS).Value), &eventMap)
 			if err != nil {
 				return nil, err
 			}
-			event, err := converter(aggregateMap)
+			event, err := converter(eventMap)
 			if err != nil {
 				return nil, err
 			}

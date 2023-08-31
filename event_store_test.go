@@ -216,7 +216,7 @@ func Test_WriteAndRead(t *testing.T) {
 	require.Nil(t, err)
 
 	// When
-	eventStore := NewEventStore(dynamodbClient, "journal", "snapshot", "journal-aid-index", "snapshot-aid-index", &DefaultKeyResolver{}, 1)
+	eventStore := NewEventStoreWithDefaults(dynamodbClient, "journal", "snapshot", "journal-aid-index", "snapshot-aid-index", 1)
 	initial, userAccountCreated := NewUserAccount(UserAccountId{Value: "1"}, "test")
 	err = eventStore.StoreEventWithSnapshot(
 		userAccountCreated,

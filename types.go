@@ -1,6 +1,8 @@
 package event_store_adapter_go
 
-import "fmt"
+import (
+	"fmt"
+)
 
 type AggregateId interface {
 	fmt.Stringer
@@ -29,4 +31,14 @@ type AggregateWithSeqNrWithVersion struct {
 	Aggregate Aggregate
 	SeqNr     uint64
 	Version   uint64
+}
+
+type EventSerializer interface {
+	Serialize(event Event) ([]byte, error)
+	Deserialize(data []byte, eventMap *map[string]interface{}) error
+}
+
+type SnapshotSerializer interface {
+	Serialize(aggregate Aggregate) ([]byte, error)
+	Deserialize(data []byte, aggregateMap *map[string]interface{}) error
 }
