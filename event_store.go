@@ -24,10 +24,14 @@ type EventStore struct {
 func NewEventStore(client *dynamodb.Client, journalTableName string, snapshotTableName string,
 	journalAidIndexName string,
 	snapshotAidIndexName string, keyResolver KeyResolver, shardCount uint64) *EventStore {
-	return &EventStore{client, journalTableName,
+	return &EventStore{
+		client,
+		journalTableName,
 		journalAidIndexName,
 		snapshotTableName,
-		snapshotAidIndexName, keyResolver, shardCount}
+		snapshotAidIndexName,
+		keyResolver,
+		shardCount}
 
 }
 

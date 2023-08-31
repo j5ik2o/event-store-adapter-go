@@ -50,8 +50,11 @@ func ReplayUserAccount(events []Event, snapshot *UserAccount, version uint64) *U
 func (ua *UserAccount) ApplyEvent(event Event) *UserAccount {
 	switch e := event.(type) {
 	case *UserAccountNameChanged:
-		update, _ := ua.Rename(e.Name)
-		return update
+		update, err := ua.Rename(e.Name)
+		if err != nil {
+			panic(err)
+		}
+		return update.aggregate
 	}
 	return ua
 }
@@ -64,7 +67,12 @@ func (ua *UserAccount) GetId() AggregateId {
 	return &ua.Id
 }
 
-func (ua *UserAccount) Rename(name string) (*UserAccount, *UserAccountNameChanged) {
+type UserAccountResult struct {
+	aggregate *UserAccount
+	event     *UserAccountNameChanged
+}
+
+func (ua *UserAccount) Rename(name string) (*UserAccountResult, error) {
 	if ua.Name == name {
 		panic("name is the same")
 	}
@@ -72,7 +80,7 @@ func (ua *UserAccount) Rename(name string) (*UserAccount, *UserAccountNameChange
 	updatedUserAccount.Name = name
 	updatedUserAccount.SeqNr += 1
 	event := NewUserAccountNameChanged(NewULID().String(), &ua.Id, updatedUserAccount.SeqNr, name, uint64(time.Now().UnixNano()))
-	return &updatedUserAccount, event
+	return &UserAccountResult{&updatedUserAccount, event}, nil
 }
 
 func (ua *UserAccount) Equals(other *UserAccount) bool {

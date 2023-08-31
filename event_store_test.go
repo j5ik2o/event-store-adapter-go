@@ -216,22 +216,22 @@ func Test_WriteAndRead(t *testing.T) {
 	require.Nil(t, err)
 
 	// When
-	epg := NewEventStore(dynamodbClient, "journal", "snapshot", "journal-aid-index", "snapshot-aid-index", &DefaultKeyResolver{}, 1)
+	eventStore := NewEventStore(dynamodbClient, "journal", "snapshot", "journal-aid-index", "snapshot-aid-index", &DefaultKeyResolver{}, 1)
 	initial, userAccountCreated := NewUserAccount(UserAccountId{Value: "1"}, "test")
-	err = epg.StoreEventWithSnapshot(
+	err = eventStore.StoreEventWithSnapshot(
 		userAccountCreated,
 		initial.Version,
 		initial,
 	)
 	require.Nil(t, err)
-	updated, userAccountNameChanged := initial.Rename("test2")
-	err = epg.StoreEventWithSnapshot(
-		userAccountNameChanged,
-		updated.Version,
+	result, err := initial.Rename("test2")
+	err = eventStore.StoreEventWithSnapshot(
+		result.event,
+		result.aggregate.Version,
 		nil,
 	)
 	require.Nil(t, err)
-	snapshotResult, err := epg.GetSnapshotById(&UserAccountId{Value: "1"}, func(m map[string]interface{}) (Aggregate, error) {
+	snapshotResult, err := eventStore.GetSnapshotById(&UserAccountId{Value: "1"}, func(m map[string]interface{}) (Aggregate, error) {
 		idMap, ok := m["Id"].(map[string]interface{})
 		if !ok {
 			return nil, fmt.Errorf("Id is not a map")
@@ -240,17 +240,15 @@ func Test_WriteAndRead(t *testing.T) {
 		if !ok {
 			return nil, fmt.Errorf("Value is not a float64")
 		}
-		return &UserAccount{
-			Id:   UserAccountId{Value: value},
-			Name: m["Name"].(string),
-		}, nil
+		result, _ := NewUserAccount(UserAccountId{Value: value}, m["Name"].(string))
+		return result, nil
 	})
 	require.Nil(t, err)
 
 	userAccount, ok := snapshotResult.Aggregate.(*UserAccount)
 	require.NotNil(t, ok)
 	t.Logf("UserAccount: %s, seqNr: %d, version: %d", userAccount, snapshotResult.SeqNr, snapshotResult.Version)
-	events, err := epg.GetEventsByIdAndSeqNr(&UserAccountId{Value: "1"}, 0, func(m map[string]interface{}) (Event, error) {
+	events, err := eventStore.GetEventsByIdAndSeqNr(&UserAccountId{Value: "1"}, 0, func(m map[string]interface{}) (Event, error) {
 		aggregateMap, ok := m["AggregateId"].(map[string]interface{})
 		if !ok {
 			return nil, fmt.Errorf("AggregateId is not a map")
