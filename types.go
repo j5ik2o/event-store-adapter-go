@@ -21,3 +21,12 @@ type Aggregate interface {
 	fmt.Stringer
 	GetId() AggregateId
 }
+
+type AggregateConverter func(map[string]interface{}) (Aggregate, error)
+type EventConverter func(map[string]interface{}) (Event, error)
+
+type AggregateWithSeqNrWithVersion struct {
+	Aggregate Aggregate
+	SeqNr     uint64
+	Version   uint64
+}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strconv"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -108,15 +107,6 @@ func (es *EventStore) putJournal(event Event) (*types.Put, error) {
 	return &input, nil
 }
 
-type AggregateConverter func(map[string]interface{}) (Aggregate, error)
-type EventConverter func(map[string]interface{}) (Event, error)
-
-type AggregateWithSeqNrWithVersion struct {
-	Aggregate Aggregate
-	SeqNr     uint64
-	Version   uint64
-}
-
 func (es *EventStore) GetSnapshotById(aggregateId AggregateId, converter AggregateConverter) (*AggregateWithSeqNrWithVersion, error) {
 	result, err := es.client.Query(context.TODO(), &dynamodb.QueryInput{
 		TableName:              aws.String(es.snapshotTableName),
@@ -175,7 +165,6 @@ func (es *EventStore) GetEventsByIdAndSeqNr(aggregateId AggregateId, seqNr uint6
 		},
 	})
 	if err != nil {
-		log.Printf("Error occurred: %v", err)
 		return nil, err
 	}
 	var events []Event
@@ -184,12 +173,10 @@ func (es *EventStore) GetEventsByIdAndSeqNr(aggregateId AggregateId, seqNr uint6
 			var aggregateMap map[string]interface{}
 			err = json.Unmarshal([]byte(item["payload"].(*types.AttributeValueMemberS).Value), &aggregateMap)
 			if err != nil {
-				log.Printf("Error occurred: %v", err)
 				return nil, err
 			}
 			event, err := converter(aggregateMap)
 			if err != nil {
-				log.Printf("Error occurred: %v", err)
 				return nil, err
 			}
 			events = append(events, event)
@@ -215,7 +202,6 @@ func (es *EventStore) StoreEventWithSnapshot(event Event, version uint64, aggreg
 			},
 		})
 		if err != nil {
-			log.Println("Error occurred:", err)
 			return err
 		}
 	} else if event.IsCreated() && aggregate != nil {
@@ -223,12 +209,10 @@ func (es *EventStore) StoreEventWithSnapshot(event Event, version uint64, aggreg
 	} else {
 		putJournal, err := es.putJournal(event)
 		if err != nil {
-			log.Println("Error occurred:", err)
 			return err
 		}
 		updateSnapshot, err := es.updateSnapshot(event, version, aggregate)
 		if err != nil {
-			log.Println("Error occurred:", err)
 			return err
 		}
 		_, err = es.client.TransactWriteItems(context.TODO(), &dynamodb.TransactWriteItemsInput{
@@ -238,7 +222,6 @@ func (es *EventStore) StoreEventWithSnapshot(event Event, version uint64, aggreg
 			},
 		})
 		if err != nil {
-			log.Println("Error occurred:", err)
 			return err
 		}
 	}
