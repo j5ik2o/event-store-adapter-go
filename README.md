@@ -1,6 +1,6 @@
 # event-store-adapter-go
 
-[![Workflow Status](https://github.com/j5ik2o/event-store-adapter-go/workflows/ci/badge.svg)](https://github.com/j5ik2o/event-store-adapter-go/actions?query=workflow%3A%22ci%22)
+[![CI](https://github.com/j5ik2o/event-store-adapter-go/actions/workflows/ci.yml/badge.svg)](https://github.com/j5ik2o/event-store-adapter-go/actions/workflows/ci.yml)
 
 This library is designed to turn DynamoDB into an Event Store for Event Sourcing.
 
