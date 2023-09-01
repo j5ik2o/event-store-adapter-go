@@ -1,6 +1,7 @@
 # event-store-adapter-go
 
 [![CI](https://github.com/j5ik2o/event-store-adapter-go/actions/workflows/ci.yml/badge.svg)](https://github.com/j5ik2o/event-store-adapter-go/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/j5ik2o/event-store-adapter-go.svg?style=flat-square)](https://github.com/j5ik2o/event-store-adapter-go/releases/latest)
 [![tokei](https://tokei.rs/b1/github/j5ik2o/event-store-adapter-go)](https://github.com/XAMPPRocky/tokei)
 
 This library is designed to turn DynamoDB into an Event Store for Event Sourcing.
