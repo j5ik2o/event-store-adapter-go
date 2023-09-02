@@ -1,4 +1,4 @@
-module event-store-adapter-go
+module j5ik2o/event-store-adapter-go
 
 go 1.21
 
