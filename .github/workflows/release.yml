@@ -44,7 +44,7 @@ jobs:
       - name: Get the next version
         id: versions
         run: |
-          NEXT_VERSION=$(echo ${{ steps.defines.outputs.prev_tag }} | python3 "${GITHUB_WORKSPACE}"/.github/next-semver.py ${{ steps.semver_level.outputs.value }})
+          NEXT_VERSION=$(echo ${{ steps.defines.outputs.prev_tag }} | python3 "${GITHUB_WORKSPACE}"/.github/next-semver.py ${{ steps.semver_level.outputs.semver_level }})
           echo "NEXT_VERSION=$NEXT_VERSION"
           echo "next_version=$NEXT_VERSION" >> $GITHUB_OUTPUT
           echo "next_tag=v$NEXT_VERSION" >> $GITHUB_OUTPUT
