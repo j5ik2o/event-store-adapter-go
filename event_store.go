@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
+// EventStore for DynamoDB.
 type EventStore struct {
 	client               *dynamodb.Client
 	journalTableName     string
@@ -23,8 +24,10 @@ type EventStore struct {
 	snapshotSerializer   SnapshotSerializer
 }
 
+// EventStoreOption is an option for EventStore.
 type EventStoreOption func(*EventStore) error
 
+// WithKeyResolver sets a key resolver.
 func WithKeyResolver(keyResolver KeyResolver) EventStoreOption {
 	return func(es *EventStore) error {
 		es.keyResolver = keyResolver
@@ -32,6 +35,7 @@ func WithKeyResolver(keyResolver KeyResolver) EventStoreOption {
 	}
 }
 
+// WithEventSerializer sets an event serializer.
 func WithEventSerializer(eventSerializer EventSerializer) EventStoreOption {
 	return func(es *EventStore) error {
 		es.eventSerializer = eventSerializer
@@ -39,6 +43,7 @@ func WithEventSerializer(eventSerializer EventSerializer) EventStoreOption {
 	}
 }
 
+// WithSnapshotSerializer sets a snapshot serializer.
 func WithSnapshotSerializer(snapshotSerializer SnapshotSerializer) EventStoreOption {
 	return func(es *EventStore) error {
 		es.snapshotSerializer = snapshotSerializer
@@ -46,6 +51,7 @@ func WithSnapshotSerializer(snapshotSerializer SnapshotSerializer) EventStoreOpt
 	}
 }
 
+// NewEventStore returns a new EventStore.
 func NewEventStore(
 	client *dynamodb.Client,
 	journalTableName string,
@@ -74,6 +80,7 @@ func NewEventStore(
 	return es, nil
 }
 
+// putSnapshot returns a PutInput for snapshot.
 func (es *EventStore) putSnapshot(event Event, aggregate Aggregate) (*types.Put, error) {
 	pkey := es.keyResolver.ResolvePkey(event.GetAggregateId().GetTypeName(), event.GetAggregateId().String(), es.shardCount)
 	skey := es.keyResolver.ResolveSkey(event.GetAggregateId().GetTypeName(), event.GetAggregateId().String(), 0)
@@ -95,6 +102,7 @@ func (es *EventStore) putSnapshot(event Event, aggregate Aggregate) (*types.Put,
 	return &input, nil
 }
 
+// updateSnapshot returns an UpdateInput for snapshot.
 func (es *EventStore) updateSnapshot(event Event, version uint64, aggregate Aggregate) (*types.Update, error) {
 	pkey := es.keyResolver.ResolvePkey(event.GetAggregateId().GetTypeName(), event.GetAggregateId().String(), es.shardCount)
 	skey := es.keyResolver.ResolveSkey(event.GetAggregateId().GetTypeName(), event.GetAggregateId().String(), 0)
@@ -128,6 +136,7 @@ func (es *EventStore) updateSnapshot(event Event, version uint64, aggregate Aggr
 	return &update, nil
 }
 
+// putJournal returns a PutInput for journal.
 func (es *EventStore) putJournal(event Event) (*types.Put, error) {
 	pkey := es.keyResolver.ResolvePkey(event.GetAggregateId().GetTypeName(), event.GetAggregateId().String(), es.shardCount)
 	skey := es.keyResolver.ResolveSkey(event.GetAggregateId().GetTypeName(), event.GetAggregateId().String(), event.GetSeqNr())
@@ -150,6 +159,12 @@ func (es *EventStore) putJournal(event Event) (*types.Put, error) {
 	return &input, nil
 }
 
+// GetSnapshotById returns a snapshot by aggregateId.
+//
+// - aggregateId is an aggregateId to get a snapshot.
+// - converter is a converter to convert a map to an aggregate.
+//
+// Returns a snapshot and an error.
 func (es *EventStore) GetSnapshotById(aggregateId AggregateId, converter AggregateConverter) (*AggregateWithSeqNrWithVersion, error) {
 	result, err := es.client.Query(context.Background(), &dynamodb.QueryInput{
 		TableName:              aws.String(es.snapshotTableName),
@@ -193,6 +208,13 @@ func (es *EventStore) GetSnapshotById(aggregateId AggregateId, converter Aggrega
 	}
 }
 
+// GetEventsByIdAndSeqNr returns events by aggregateId and seqNr.
+//
+// - aggregateId is an aggregateId to get events.
+// - seqNr is a seqNr to get events.
+// - converter is a converter to convert a map to an event.
+//
+// Returns events and an error.
 func (es *EventStore) GetEventsByIdAndSeqNr(aggregateId AggregateId, seqNr uint64, converter EventConverter) ([]Event, error) {
 	result, err := es.client.Query(context.Background(), &dynamodb.QueryInput{
 		TableName:              aws.String(es.journalTableName),
@@ -228,6 +250,15 @@ func (es *EventStore) GetEventsByIdAndSeqNr(aggregateId AggregateId, seqNr uint6
 	return events, nil
 }
 
+// StoreEventWithSnapshot stores an event and a snapshot atomically.
+//
+// - event is an event to store.
+// - version is a version of the aggregate.
+// - aggregate is an aggregate to store.
+//   - Required when event is created, otherwise you can choose whether or not to save a snapshot.
+//   - If you do not want to save snapshots, specify nil.
+//
+// Occurs an error, if the event and the snapshot can not stored.
 func (es *EventStore) StoreEventWithSnapshot(event Event, version uint64, aggregate Aggregate) error {
 	if event.IsCreated() && aggregate != nil {
 		putJournal, err := es.putJournal(event)
