@@ -2,9 +2,10 @@ package event_store_adapter_go
 
 import (
 	"fmt"
-	"github.com/oklog/ulid"
 	"math/rand"
 	"time"
+
+	ulid "github.com/oklog/ulid/v2"
 )
 
 type UserAccountId struct {
