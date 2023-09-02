@@ -43,7 +43,7 @@ repository := NewUserAccountRepository(eventStore)
 
 userAccount1, userAccountCreated := NewUserAccount(UserAccountId{Value: "1"}, "test")
 // Store an aggregate with a create event
-err = repository.Store(userAccountCreated, initial.Version, initial)
+err = repository.Store(userAccountCreated, userAccount1.Version, userAccount1)
 if err != nil {
     return err
 }
@@ -59,6 +59,8 @@ userAccountUpdated, userAccountReanmed := userAccount2.ChangeName("test2")
 
 // Store the new event without a snapshot
 err = repository.Store(userAccountReanmed, userAccountUpdated.Version, nil)
+// Store the new event with a snapshot
+// err = repository.Store(userAccountReanmed, userAccountUpdated.Version, userAccountUpdated)
 if err != nil {
     return err
 }
