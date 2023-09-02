@@ -4,9 +4,6 @@ GOTEST=$(GOCMD) test
 GOGET=$(GOCMD) get
 GOMOD=$(GOCMD) mod
 
-# Project parameters
-PKG_NAME=mylibrary
-
 all: test
 
 test:

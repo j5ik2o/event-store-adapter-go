@@ -52,6 +52,7 @@ func Test_WriteAndRead(t *testing.T) {
 	)
 	require.Nil(t, err)
 	result, err := initial.Rename("test2")
+	require.Nil(t, err)
 	err = eventStore.StoreEventWithSnapshot(
 		result.Event,
 		result.Aggregate.Version,
