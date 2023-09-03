@@ -70,7 +70,7 @@ jobs:
           git tag -a "${{ steps.versions.outputs.next_tag }}" ${{ steps.git_commit_push.outputs.commit_sha }} -m "${{ steps.versions.outputs.next_tag }}"
           git push origin ${{ steps.versions.outputs.next_tag }}
           git log ${{ steps.defines.outputs.prev_tag }}..${{ steps.versions.outputs.next_tag }} --pretty=format:"%h%x09%H%x09%s" \
-            -P --grep='^(build|ci|feat|fix|docs|style|refactor|perf|test|revert|chore)(.*)?:.*$' \
+            -P --grep='^(BREAKING CHANGE|build|ci|feat|fix|docs|style|refactor|perf|test|revert|chore)(.*)?:.*$' \
             --no-merges --full-history | \
             python3 "${GITHUB_WORKSPACE}"/.github/create-release-note.py > changelog.txt
         if: steps.changes.outputs.count > 0
