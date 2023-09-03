@@ -91,7 +91,7 @@ func (es *EventStore) putSnapshot(event Event, aggregate Aggregate) (*types.Put,
 		Item: map[string]types.AttributeValue{
 			"pkey":    &types.AttributeValueMemberS{Value: pkey},
 			"skey":    &types.AttributeValueMemberS{Value: skey},
-			"aid":     &types.AttributeValueMemberS{Value: event.GetAggregateId().String()},
+			"aid":     &types.AttributeValueMemberS{Value: event.GetAggregateId().AsString()},
 			"seq_nr":  &types.AttributeValueMemberN{Value: strconv.FormatUint(event.GetSeqNr(), 10)},
 			"payload": &types.AttributeValueMemberB{Value: payload},
 			"version": &types.AttributeValueMemberN{Value: "1"},
@@ -147,7 +147,7 @@ func (es *EventStore) putJournal(event Event) (*types.Put, error) {
 		Item: map[string]types.AttributeValue{
 			"pkey":        &types.AttributeValueMemberS{Value: pkey},
 			"skey":        &types.AttributeValueMemberS{Value: skey},
-			"aid":         &types.AttributeValueMemberS{Value: event.GetAggregateId().String()},
+			"aid":         &types.AttributeValueMemberS{Value: event.GetAggregateId().AsString()},
 			"seq_nr":      &types.AttributeValueMemberN{Value: strconv.FormatUint(event.GetSeqNr(), 10)},
 			"payload":     &types.AttributeValueMemberB{Value: payload},
 			"occurred_at": &types.AttributeValueMemberN{Value: strconv.FormatUint(event.GetOccurredAt(), 10)},
@@ -173,7 +173,7 @@ func (es *EventStore) GetSnapshotById(aggregateId AggregateId, converter Aggrega
 			"#seq_nr": "seq_nr",
 		},
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":aid":    &types.AttributeValueMemberS{Value: aggregateId.String()},
+			":aid":    &types.AttributeValueMemberS{Value: aggregateId.AsString()},
 			":seq_nr": &types.AttributeValueMemberN{Value: "0"},
 		},
 		ScanIndexForward: aws.Bool(false),
@@ -223,7 +223,7 @@ func (es *EventStore) GetEventsByIdAndSeqNr(aggregateId AggregateId, seqNr uint6
 			"#seq_nr": "seq_nr",
 		},
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":aid":    &types.AttributeValueMemberS{Value: aggregateId.String()},
+			":aid":    &types.AttributeValueMemberS{Value: aggregateId.AsString()},
 			":seq_nr": &types.AttributeValueMemberN{Value: strconv.FormatUint(seqNr, 10)},
 		},
 	})

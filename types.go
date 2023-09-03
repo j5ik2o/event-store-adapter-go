@@ -8,6 +8,7 @@ type AggregateId interface {
 	fmt.Stringer
 	GetTypeName() string
 	GetValue() string
+	AsString() string
 }
 
 type Event interface {
