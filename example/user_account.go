@@ -6,7 +6,7 @@ import (
 	"time"
 
 	esag "github.com/j5ik2o/event-store-adapter-go"
-	ulid "github.com/oklog/ulid/v2"
+	"github.com/oklog/ulid/v2"
 )
 
 type userAccountId struct {
@@ -17,8 +17,12 @@ func (id *userAccountId) GetTypeName() string {
 	return "UserAccountId"
 }
 
-func (id *userAccountId) String() string {
+func (id *userAccountId) GetValue() string {
 	return id.Value
+}
+
+func (id *userAccountId) String() string {
+	return fmt.Sprintf("%s-%s", id.GetTypeName(), id.Value)
 }
 
 type userAccount struct {

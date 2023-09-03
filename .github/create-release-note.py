@@ -4,9 +4,10 @@ import sys
 import csv
 import re
 
-commit_messages = {'build': [], 'ci': [], 'feat': [], 'fix': [], 'docs': [], 'style': [], 'refactor': [], 'perf': [], 'test': [], 'revert': [], 'chore': []}
+commit_messages = {'BREAKING CHANGE': [], 'build': [], 'ci': [], 'feat': [], 'fix': [], 'docs': [], 'style': [], 'refactor': [], 'perf': [], 'test': [], 'revert': [], 'chore': []}
 
-titles = {'build': 'Build Systems', 'ci': 'Continuous Integration', 'feat': 'Features', 'fix': 'Bug Fixes', 'docs': 'Documentation',
+titles = {'BREAKING CHANGE': 'Breaking Changes',
+         'build': 'Build Systems', 'ci': 'Continuous Integration', 'feat': 'Features', 'fix': 'Bug Fixes', 'docs': 'Documentation',
          'style': 'Styles', 'refactor': 'Code Refactoring', 'perf': 'Performance Improvements', 'test': 'Tests',
          'revert': 'Reverts', 'chore': 'Chores'}
 

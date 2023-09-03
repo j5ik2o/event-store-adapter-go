@@ -7,6 +7,7 @@ import (
 type AggregateId interface {
 	fmt.Stringer
 	GetTypeName() string
+	GetValue() string
 }
 
 type Event interface {
