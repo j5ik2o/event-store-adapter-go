@@ -31,7 +31,7 @@ func (e *userAccountCreated) String() string {
 }
 
 func (e *userAccountCreated) GetId() string {
-	return fmt.Sprintf("%s", e.Id)
+	return e.Id
 }
 
 func (e *userAccountCreated) GetTypeName() string {
