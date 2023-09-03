@@ -2,7 +2,6 @@ package event_store_adapter_go
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 
@@ -84,7 +83,7 @@ func NewEventStore(
 func (es *EventStore) putSnapshot(event Event, aggregate Aggregate) (*types.Put, error) {
 	pkey := es.keyResolver.ResolvePkey(event, es.shardCount)
 	skey := es.keyResolver.ResolveSkey(event, 0)
-	payload, err := json.Marshal(aggregate)
+	payload, err := es.snapshotSerializer.Serialize(aggregate)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +94,7 @@ func (es *EventStore) putSnapshot(event Event, aggregate Aggregate) (*types.Put,
 			"skey":    &types.AttributeValueMemberS{Value: skey},
 			"aid":     &types.AttributeValueMemberS{Value: event.GetAggregateId().String()},
 			"seq_nr":  &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", event.GetSeqNr())},
-			"payload": &types.AttributeValueMemberS{Value: string(payload)},
+			"payload": &types.AttributeValueMemberB{Value: payload},
 			"version": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", 1)},
 		},
 	}
@@ -131,7 +130,7 @@ func (es *EventStore) updateSnapshot(event Event, version uint64, aggregate Aggr
 		update.ExpressionAttributeNames["#seq_nr"] = "seq_nr"
 		update.ExpressionAttributeNames["#payload"] = "payload"
 		update.ExpressionAttributeValues[":seq_nr"] = &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", event.GetSeqNr())}
-		update.ExpressionAttributeValues[":payload"] = &types.AttributeValueMemberS{Value: string(payload)}
+		update.ExpressionAttributeValues[":payload"] = &types.AttributeValueMemberB{Value: payload}
 	}
 	return &update, nil
 }
@@ -151,7 +150,7 @@ func (es *EventStore) putJournal(event Event) (*types.Put, error) {
 			"skey":        &types.AttributeValueMemberS{Value: skey},
 			"aid":         &types.AttributeValueMemberS{Value: event.GetAggregateId().String()},
 			"seq_nr":      &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", event.GetSeqNr())},
-			"payload":     &types.AttributeValueMemberS{Value: string(payload)},
+			"payload":     &types.AttributeValueMemberB{Value: payload},
 			"occurred_at": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", event.GetOccurredAt())},
 		},
 		ConditionExpression: aws.String("attribute_not_exists(pkey) AND attribute_not_exists(skey)"),
@@ -194,7 +193,7 @@ func (es *EventStore) GetSnapshotById(aggregateId AggregateId, converter Aggrega
 			return nil, err
 		}
 		var aggregateMap map[string]interface{}
-		err = es.snapshotSerializer.Deserialize([]byte(result.Items[0]["payload"].(*types.AttributeValueMemberS).Value), &aggregateMap)
+		err = es.snapshotSerializer.Deserialize(result.Items[0]["payload"].(*types.AttributeValueMemberB).Value, &aggregateMap)
 		if err != nil {
 			return nil, err
 		}
@@ -236,7 +235,7 @@ func (es *EventStore) GetEventsByIdAndSeqNr(aggregateId AggregateId, seqNr uint6
 	if len(result.Items) > 0 {
 		for _, item := range result.Items {
 			var eventMap map[string]interface{}
-			err = es.eventSerializer.Deserialize([]byte(item["payload"].(*types.AttributeValueMemberS).Value), &eventMap)
+			err = es.eventSerializer.Deserialize(item["payload"].(*types.AttributeValueMemberB).Value, &eventMap)
 			if err != nil {
 				return nil, err
 			}
