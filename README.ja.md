@@ -69,7 +69,7 @@ if err != nil {
 
 ## テーブル仕様
 
-[docs/DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md)を参照してください。
+[docs/DATABASE_SCHEMA.ja.md](docs/DATABASE_SCHEMA.ja.md)を参照してください。
 
 ## ライセンス
 
