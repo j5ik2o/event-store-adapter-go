@@ -1,5 +1,6 @@
 #! /usr/bin/env python3
 # -*- coding: utf-8 -*-
+
 import sys
 import csv
 import re
@@ -7,9 +8,17 @@ import re
 commit_messages = {'BREAKING CHANGE': [], 'build': [], 'ci': [], 'feat': [], 'fix': [], 'docs': [], 'style': [], 'refactor': [], 'perf': [], 'test': [], 'revert': [], 'chore': []}
 
 titles = {'BREAKING CHANGE': 'Breaking Changes',
-         'build': 'Build Systems', 'ci': 'Continuous Integration', 'feat': 'Features', 'fix': 'Bug Fixes', 'docs': 'Documentation',
-         'style': 'Styles', 'refactor': 'Code Refactoring', 'perf': 'Performance Improvements', 'test': 'Tests',
-         'revert': 'Reverts', 'chore': 'Chores'}
+          'build': 'Build Systems',
+          'ci': 'Continuous Integration',
+          'feat': 'Features',
+          'fix': 'Bug Fixes',
+          'docs': 'Documentation',
+          'style': 'Styles',
+          'refactor': 'Code Refactoring',
+          'perf': 'Performance Improvements',
+          'test': 'Tests',
+          'revert': 'Reverts',
+          'chore': 'Chores'}
 
 cin = csv.reader(sys.stdin, delimiter="\t") # 補足: 開く対象がファイルのときは newline='' をパラメータに追加
 
