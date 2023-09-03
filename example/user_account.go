@@ -13,6 +13,10 @@ type userAccountId struct {
 	Value string
 }
 
+func newUserAccountId(value string) userAccountId {
+	return userAccountId{Value: value}
+}
+
 func (id *userAccountId) GetTypeName() string {
 	return "UserAccountId"
 }

@@ -32,7 +32,8 @@ func newUserAccountRepository(eventStore *esag.EventStore) *userAccountRepositor
 			if !ok {
 				return nil, fmt.Errorf("Value is not a float64")
 			}
-			result, _ := newUserAccount(userAccountId{Value: value}, m["Name"].(string))
+			userAccountId := newUserAccountId(value)
+			result, _ := newUserAccount(userAccountId, m["Name"].(string))
 			return result, nil
 		},
 		eventConverter: func(m map[string]interface{}) (esag.Event, error) {
@@ -46,17 +47,19 @@ func newUserAccountRepository(eventStore *esag.EventStore) *userAccountRepositor
 			}
 			switch m["TypeName"].(string) {
 			case "UserAccountCreated":
+				userAccountId := newUserAccountId(aggregateId)
 				return newUserAccountCreated(
 					m["Id"].(string),
-					&userAccountId{Value: aggregateId},
+					&userAccountId,
 					uint64(m["SeqNr"].(float64)),
 					m["Name"].(string),
 					uint64(m["OccurredAt"].(float64)),
 				), nil
 			case "UserAccountNameChanged":
+				userAccountId := newUserAccountId(aggregateId)
 				return newUserAccountNameChanged(
 					m["Id"].(string),
-					&userAccountId{Value: aggregateId},
+					&userAccountId,
 					uint64(m["SeqNr"].(float64)),
 					m["Name"].(string),
 					uint64(m["OccurredAt"].(float64)),
@@ -116,7 +119,7 @@ func Test_RepositoryStoreAndFindById(t *testing.T) {
 
 	// When
 	repository := newUserAccountRepository(eventStore)
-	initial, userAccountCreated := newUserAccount(userAccountId{Value: "1"}, "test")
+	initial, userAccountCreated := newUserAccount(newUserAccountId("1"), "test")
 	err = repository.store(userAccountCreated, initial.Version, initial)
 	require.Nil(t, err)
 	actual, err := repository.findById(&initial.Id)
