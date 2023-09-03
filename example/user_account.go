@@ -26,6 +26,10 @@ func (id *userAccountId) GetValue() string {
 }
 
 func (id *userAccountId) String() string {
+	return fmt.Sprintf("userAccount{TypeName: %s, Valuie: %s}", id.GetTypeName(), id.Value)
+}
+
+func (id *userAccountId) AsString() string {
 	return fmt.Sprintf("%s-%s", id.GetTypeName(), id.Value)
 }
 
