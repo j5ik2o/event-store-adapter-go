@@ -131,6 +131,7 @@ func Test_RepositoryStoreAndFindById(t *testing.T) {
 	require.Nil(t, err)
 
 	err = repository.store(result.Event, actual.Version, nil)
+	require.Nil(t, err)
 	actual2, err := repository.findById(&initial.Id)
 	require.Nil(t, err)
 	assert.Equal(t, actual2.Name, "test2")
