@@ -2,7 +2,6 @@ package event_store_adapter_go
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -93,9 +92,9 @@ func (es *EventStore) putSnapshot(event Event, aggregate Aggregate) (*types.Put,
 			"pkey":    &types.AttributeValueMemberS{Value: pkey},
 			"skey":    &types.AttributeValueMemberS{Value: skey},
 			"aid":     &types.AttributeValueMemberS{Value: event.GetAggregateId().String()},
-			"seq_nr":  &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", event.GetSeqNr())},
+			"seq_nr":  &types.AttributeValueMemberN{Value: strconv.FormatUint(event.GetSeqNr(), 10)},
 			"payload": &types.AttributeValueMemberB{Value: payload},
-			"version": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", 1)},
+			"version": &types.AttributeValueMemberN{Value: "1"},
 		},
 	}
 	return &input, nil
@@ -116,8 +115,8 @@ func (es *EventStore) updateSnapshot(event Event, version uint64, aggregate Aggr
 			"#version": "version",
 		},
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":before_version": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", version)},
-			":after_version":  &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", version+1)},
+			":before_version": &types.AttributeValueMemberN{Value: strconv.FormatUint(version, 10)},
+			":after_version":  &types.AttributeValueMemberN{Value: strconv.FormatUint(version+1, 10)},
 		},
 		ConditionExpression: aws.String("#version=:before_version"),
 	}
@@ -129,7 +128,7 @@ func (es *EventStore) updateSnapshot(event Event, version uint64, aggregate Aggr
 		update.UpdateExpression = aws.String("SET #payload=:payload, #seq_nr=:seq_nr, #version=:after_version")
 		update.ExpressionAttributeNames["#seq_nr"] = "seq_nr"
 		update.ExpressionAttributeNames["#payload"] = "payload"
-		update.ExpressionAttributeValues[":seq_nr"] = &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", event.GetSeqNr())}
+		update.ExpressionAttributeValues[":seq_nr"] = &types.AttributeValueMemberN{Value: strconv.FormatUint(event.GetSeqNr(), 10)}
 		update.ExpressionAttributeValues[":payload"] = &types.AttributeValueMemberB{Value: payload}
 	}
 	return &update, nil
@@ -149,9 +148,9 @@ func (es *EventStore) putJournal(event Event) (*types.Put, error) {
 			"pkey":        &types.AttributeValueMemberS{Value: pkey},
 			"skey":        &types.AttributeValueMemberS{Value: skey},
 			"aid":         &types.AttributeValueMemberS{Value: event.GetAggregateId().String()},
-			"seq_nr":      &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", event.GetSeqNr())},
+			"seq_nr":      &types.AttributeValueMemberN{Value: strconv.FormatUint(event.GetSeqNr(), 10)},
 			"payload":     &types.AttributeValueMemberB{Value: payload},
-			"occurred_at": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", event.GetOccurredAt())},
+			"occurred_at": &types.AttributeValueMemberN{Value: strconv.FormatUint(event.GetOccurredAt(), 10)},
 		},
 		ConditionExpression: aws.String("attribute_not_exists(pkey) AND attribute_not_exists(skey)"),
 	}
@@ -175,7 +174,7 @@ func (es *EventStore) GetSnapshotById(aggregateId AggregateId, converter Aggrega
 		},
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":aid":    &types.AttributeValueMemberS{Value: aggregateId.String()},
-			":seq_nr": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", 0)},
+			":seq_nr": &types.AttributeValueMemberN{Value: "0"},
 		},
 		ScanIndexForward: aws.Bool(false),
 		Limit:            aws.Int32(1),
@@ -225,7 +224,7 @@ func (es *EventStore) GetEventsByIdAndSeqNr(aggregateId AggregateId, seqNr uint6
 		},
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":aid":    &types.AttributeValueMemberS{Value: aggregateId.String()},
-			":seq_nr": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", seqNr)},
+			":seq_nr": &types.AttributeValueMemberN{Value: strconv.FormatUint(seqNr, 10)},
 		},
 	})
 	if err != nil {
