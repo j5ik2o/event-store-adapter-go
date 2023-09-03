@@ -25,7 +25,7 @@ jobs:
         id: changes
         run: |
           LOGS=$(git log ${{ steps.defines.outputs.prev_tag }}..HEAD --pretty=format:"%s" \
-            --no-merges -P --grep='^(build|ci|feat|fix|docs|style|refactor|perf|test|revert|chore)(\(.*\))?:')
+            --no-merges -P --grep='^(BREAKING CHANGE|build|ci|feat|fix|docs|style|refactor|perf|test|revert|chore)(\(.*\))?:')
           for log in $LOGS; do
             echo "$log"
           done
@@ -36,7 +36,7 @@ jobs:
         id: semver_level
         run: |
           SEMVER_LEVEL=$(git log ${{ steps.defines.outputs.prev_tag }}..HEAD --pretty=format:"%h%x09%H%x09%s" \
-            --no-merges -P --grep='^(build|ci|feat|fix|docs|style|refactor|perf|test|revert|chore)(\(.*\))?:' \
+            --no-merges -P --grep='^(BREAKING CHANGE|build|ci|feat|fix|docs|style|refactor|perf|test|revert|chore)(\(.*\))?:' \
             | python3 "${GITHUB_WORKSPACE}"/.github/semver-level.py)
           echo "SEMVER_LEVEL=$SEMVER_LEVEL"
           echo "semver_level=$SEMVER_LEVEL" >> $GITHUB_OUTPUT
