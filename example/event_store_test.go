@@ -44,7 +44,8 @@ func Test_WriteAndRead(t *testing.T) {
 	// When
 	eventStore, err := event_store_adapter_go.NewEventStore(dynamodbClient, "journal", "snapshot", "journal-aid-index", "snapshot-aid-index", 1)
 	require.Nil(t, err)
-	initial, userAccountCreated := newUserAccount(userAccountId{Value: "1"}, "test")
+	userAccountId1 := newUserAccountId("1")
+	initial, userAccountCreated := newUserAccount(userAccountId1, "test")
 	err = eventStore.StoreEventWithSnapshot(
 		userAccountCreated,
 		initial.Version,
@@ -59,7 +60,7 @@ func Test_WriteAndRead(t *testing.T) {
 		nil,
 	)
 	require.Nil(t, err)
-	snapshotResult, err := eventStore.GetSnapshotById(&userAccountId{Value: "1"}, func(m map[string]interface{}) (event_store_adapter_go.Aggregate, error) {
+	snapshotResult, err := eventStore.GetSnapshotById(&userAccountId1, func(m map[string]interface{}) (event_store_adapter_go.Aggregate, error) {
 		idMap, ok := m["Id"].(map[string]interface{})
 		if !ok {
 			return nil, fmt.Errorf("Id is not a map")
@@ -68,7 +69,8 @@ func Test_WriteAndRead(t *testing.T) {
 		if !ok {
 			return nil, fmt.Errorf("Value is not a float64")
 		}
-		result, _ := newUserAccount(userAccountId{Value: value}, m["Name"].(string))
+		userAccountId := newUserAccountId(value)
+		result, _ := newUserAccount(userAccountId, m["Name"].(string))
 		return result, nil
 	})
 	require.Nil(t, err)
@@ -76,7 +78,7 @@ func Test_WriteAndRead(t *testing.T) {
 	userAccount1, ok := snapshotResult.Aggregate.(*userAccount)
 	require.NotNil(t, ok)
 	t.Logf("UserAccount: %s, seqNr: %d, version: %d", userAccount1, snapshotResult.SeqNr, snapshotResult.Version)
-	events, err := eventStore.GetEventsByIdAndSeqNr(&userAccountId{Value: "1"}, 0, func(m map[string]interface{}) (event_store_adapter_go.Event, error) {
+	events, err := eventStore.GetEventsByIdAndSeqNr(&userAccountId1, 0, func(m map[string]interface{}) (event_store_adapter_go.Event, error) {
 		aggregateMap, ok := m["AggregateId"].(map[string]interface{})
 		if !ok {
 			return nil, fmt.Errorf("AggregateId is not a map")
@@ -87,17 +89,19 @@ func Test_WriteAndRead(t *testing.T) {
 		}
 		switch m["TypeName"].(string) {
 		case "UserAccountCreated":
+			userAccountId := newUserAccountId(aggregateId)
 			return newUserAccountCreated(
 				m["Id"].(string),
-				&userAccountId{Value: aggregateId},
+				&userAccountId,
 				uint64(m["SeqNr"].(float64)),
 				m["Name"].(string),
 				uint64(m["OccurredAt"].(float64)),
 			), nil
 		case "UserAccountNameChanged":
+			userAccountId := newUserAccountId(aggregateId)
 			return newUserAccountNameChanged(
 				m["Id"].(string),
-				&userAccountId{Value: aggregateId},
+				&userAccountId,
 				uint64(m["SeqNr"].(float64)),
 				m["Name"].(string),
 				uint64(m["OccurredAt"].(float64)),
@@ -110,7 +114,7 @@ func Test_WriteAndRead(t *testing.T) {
 	t.Logf("Events: %v", events)
 
 	actual := replayUserAccount(events, snapshotResult.Aggregate.(*userAccount), snapshotResult.Version)
-	aggregate, _ := newUserAccount(userAccountId{Value: "1"}, "test2")
+	aggregate, _ := newUserAccount(userAccountId1, "test2")
 
 	// Then
 	assert.True(t, actual.Equals(aggregate))
