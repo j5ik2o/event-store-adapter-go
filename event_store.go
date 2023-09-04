@@ -80,8 +80,8 @@ func NewEventStore(
 
 // putSnapshot returns a PutInput for snapshot.
 func (es *EventStore) putSnapshot(event Event, aggregate Aggregate) (*types.Put, error) {
-	pkey := es.keyResolver.ResolvePkey(event, es.shardCount)
-	skey := es.keyResolver.ResolveSkey(event, 0)
+	pkey := es.keyResolver.ResolvePkey(event.GetAggregateId(), es.shardCount)
+	skey := es.keyResolver.ResolveSkey(event.GetAggregateId(), 0)
 	payload, err := es.snapshotSerializer.Serialize(aggregate)
 	if err != nil {
 		return nil, err
@@ -102,8 +102,8 @@ func (es *EventStore) putSnapshot(event Event, aggregate Aggregate) (*types.Put,
 
 // updateSnapshot returns an UpdateInput for snapshot.
 func (es *EventStore) updateSnapshot(event Event, version uint64, aggregate Aggregate) (*types.Update, error) {
-	pkey := es.keyResolver.ResolvePkey(event, es.shardCount)
-	skey := es.keyResolver.ResolveSkey(event, 0)
+	pkey := es.keyResolver.ResolvePkey(event.GetAggregateId(), es.shardCount)
+	skey := es.keyResolver.ResolveSkey(event.GetAggregateId(), 0)
 	update := types.Update{
 		TableName:        aws.String(es.snapshotTableName),
 		UpdateExpression: aws.String("SET #version=:after_version"),
@@ -136,8 +136,8 @@ func (es *EventStore) updateSnapshot(event Event, version uint64, aggregate Aggr
 
 // putJournal returns a PutInput for journal.
 func (es *EventStore) putJournal(event Event) (*types.Put, error) {
-	pkey := es.keyResolver.ResolvePkey(event, es.shardCount)
-	skey := es.keyResolver.ResolveSkey(event, event.GetSeqNr())
+	pkey := es.keyResolver.ResolvePkey(event.GetAggregateId(), es.shardCount)
+	skey := es.keyResolver.ResolveSkey(event.GetAggregateId(), event.GetSeqNr())
 	payload, err := es.eventSerializer.Serialize(event)
 	if err != nil {
 		return nil, err
