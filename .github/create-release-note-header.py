@@ -14,13 +14,13 @@ next_tag = args[4]
 repo_url = f"{server_url}/{repo_name}"
 compare_url = f"{repo_url}/compare/{previous_tag}...{next_tag}"
 
-previous_version = previous_tag.replace("v", "")
+next_version = next_tag.replace("v", "")
 
 utc_now = datetime.now(timezone.utc)
 today = utc_now.strftime("%Y-%m-%d")
 
 header=f"""
-### [{previous_version}]({compare_url}) ({today})
+### [{next_version}]({compare_url}) ({today})
 
 """
 
