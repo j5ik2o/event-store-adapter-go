@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	event_store_adapter_go "github.com/j5ik2o/event-store-adapter-go"
 	"github.com/j5ik2o/event-store-adapter-go/common"
@@ -42,7 +43,15 @@ func Test_WriteAndRead(t *testing.T) {
 	require.Nil(t, err)
 
 	// When
-	eventStore, err := event_store_adapter_go.NewEventStore(dynamodbClient, "journal", "snapshot", "journal-aid-index", "snapshot-aid-index", 1, event_store_adapter_go.WithKeepSnapshot(true))
+	eventStore, err := event_store_adapter_go.NewEventStore(
+		dynamodbClient,
+		"journal",
+		"snapshot",
+		"journal-aid-index",
+		"snapshot-aid-index",
+		1,
+		event_store_adapter_go.WithKeepSnapshot(true),
+		event_store_adapter_go.WithDeleteTtl(1*time.Second))
 	require.Nil(t, err)
 	userAccountId1 := newUserAccountId("1")
 	initial, userAccountCreated := newUserAccount(userAccountId1, "test")
