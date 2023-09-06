@@ -124,7 +124,9 @@ func (es *EventStore) putSnapshot(event Event, seqNr uint64, aggregate Aggregate
 			"seq_nr":  &types.AttributeValueMemberN{Value: strconv.FormatUint(seqNr, 10)},
 			"payload": &types.AttributeValueMemberB{Value: payload},
 			"version": &types.AttributeValueMemberN{Value: "1"},
+			"ttl":     &types.AttributeValueMemberN{Value: "0"},
 		},
+		ConditionExpression: aws.String("attribute_not_exists(pkey) AND attribute_not_exists(skey)"),
 	}
 	return &input, nil
 }
@@ -473,7 +475,7 @@ type PkeySkey struct {
 }
 
 func (es *EventStore) getLastSnapshotKeys(aid AggregateId, limit int32) ([]PkeySkey, error) {
-	response, err := es.client.Query(context.Background(), &dynamodb.QueryInput{
+	input := &dynamodb.QueryInput{
 		TableName:              aws.String(es.snapshotTableName),
 		IndexName:              aws.String(es.snapshotAidIndexName),
 		KeyConditionExpression: aws.String("#aid = :aid AND #seq_nr > :seq_nr"),
@@ -487,7 +489,13 @@ func (es *EventStore) getLastSnapshotKeys(aid AggregateId, limit int32) ([]PkeyS
 		},
 		ScanIndexForward: aws.Bool(false),
 		Limit:            aws.Int32(limit),
-	})
+	}
+	if es.deleteTtl < math.MaxInt64 {
+		input.FilterExpression = aws.String("#ttl = :ttl")
+		input.ExpressionAttributeNames["#ttl"] = "ttl"
+		input.ExpressionAttributeValues[":ttl"] = &types.AttributeValueMemberN{Value: "0"}
+	}
+	response, err := es.client.Query(context.Background(), input)
 	if err != nil {
 		return nil, err
 	}
