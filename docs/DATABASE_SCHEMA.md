@@ -31,17 +31,19 @@ This table is used to store aggregate state and to speed up replay of aggregates
 | payload     | State of Aggregate                                                                                        | {"id":{"value":"0189053a-d0b4-8f9b-4fb6-db91f72ccf16"},"name":"test","members":{"members_ids_by_user_account_id":{"01H42KNM5MBVRBZTADAZ9ETSPZ":"01H42KNM5M2QEW700VCW4J2KYE"},"members":{"01H42KNM5M2QEW700VCW4J2KYE":{"id":"01H42KNM5M2QEW700VCW4J2KYE","user_account_id":{"value":"0189053a-d0b4-5ef0-bfe9-4d57d2ed66df"},"role":"Admin"}}},"messages":[],"seq_nr_counter":1,"version":1} |         |
 | aid         | Aggregate ID                                                                                              | group-chat-01H42K4ABWQ5V2XQEP3A48VE0Z                                                                                                                                                                                                                                                                                                                                                      |         |
 | ser_nr      | Sequence Number(origin=1)                                                                                 | 12345                                                                                                                                                                                                                                                                                                                                                                                      |         |
+| ttl         | TTL for deletion(seconds)                                                                                 | 1624980000                                                                                                                                                                                                                                                                                                                                                                                 |         |
 | version     | Version for optimistic lock(origin=1)                                                                     | 1                                                                                                                                                                                                                                                                                                                                                                                          |         |
 
-GSI is applied to aid and seq_nr, and this index is used during replay.
+- When the snapshot redundancy feature is disabled, only a snapshot is stored at skey=0. When enabled, two snapshots are stored at skey=aggregate.seq_nr() in addition to skey=0. Each time a snapshot is saved, skey=aggregate.seq_nr() snapshot will be increased, but you can specify an upper limit for the snapshot (default is 1). If the upper limit is exceeded, the older snapshots will be deleted first. By default, the deletion is client-initiated; you can also use TTL to let DynamoDB itself do the deletion.
+- GSI is applied to aid and seq_nr, and this index is used during replay.
 
-### イベント及びスナップショットの書き込み
+### Writing events and snapshots
 
-1. 集約にてコマンドが受理されると、最新のseq_nrが付与されたイベントが生成されます。
-2. 生成されたイベントはjournalテーブルに書き込まれます。ただし、この書き込みは必ずsnapshotテーブルと同じトランザクションで行われ、versionが一致する条件下で実施されます。初回のイベント以外は、snapshotのpayloadを更新することはオプションです。
+1. When the command is accepted by aggregate, an event with the latest seq_nr is generated. 
+2. The generated events are written to the journal table. However, this write is always done in the same transaction as the snapshot table and under version matching conditions. Except for the first event, updating the payload of snapshot is optional.
 
-### イベント及びスナップショットを使って集約をリプレイする
+### Replaying an aggregate with events and snapshots
 
-1. 集約のIDを指定して、スナップショットを取得します。
-2. 取得した集約のIDとスナップショットのシーケンス番号以降のイベントをjournalテーブルから読み込みます。
-3. 読み込んだイベントをスナップショットに適用することで、最新の集約状態を取得します。
+1. Specify the ID of the aggregate and take a snapshot.
+2. Read the events from the journal table after the ID of the retrieved aggregate and the sequence number of the snapshot.
+3. Apply the read events to the snapshot to obtain the latest aggregate state.
