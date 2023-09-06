@@ -37,6 +37,13 @@ func WithKeepSnapshot(keepSnapshot bool) EventStoreOption {
 	}
 }
 
+func WithDeleteTtl(deleteTtl time.Duration) EventStoreOption {
+	return func(es *EventStore) error {
+		es.deleteTtl = deleteTtl
+		return nil
+	}
+}
+
 func WithKeepSnapshotCount(keepSnapshotCount uint32) EventStoreOption {
 	return func(es *EventStore) error {
 		es.keepSnapshotCount = keepSnapshotCount

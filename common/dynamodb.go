@@ -141,6 +141,14 @@ func CreateSnapshotTable(t *testing.T, ctx context.Context, client *dynamodb.Cli
 	if err != nil {
 		return err
 	}
+
+	client.UpdateTimeToLive(ctx, &dynamodb.UpdateTimeToLiveInput{
+		TableName: aws.String(tableName),
+		TimeToLiveSpecification: &types.TimeToLiveSpecification{
+			Enabled:       aws.Bool(true),
+			AttributeName: aws.String("ttl"),
+		},
+	})
 	t.Log("created snapshot table")
 	return nil
 }
