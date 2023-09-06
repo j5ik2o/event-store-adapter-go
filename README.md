@@ -20,15 +20,15 @@ type UserAccountRepository struct {
 }
 
 func (r *UserAccountRepository) Store(event Event, version uint64, aggregate Aggregate) error {
-    return r.eventStore.StoreEventWithSnapshot(event, version, aggregate)
+    return r.eventStore.StoreEventAndSnapshotOpt(event, version, aggregate)
 }
 
 func (r *UserAccountRepository) FindById(id AggregateId) (*UserAccount, error) {
-    result, err := r.eventStore.GetSnapshotById(id, r.aggregateConverter)
+    result, err := r.eventStore.GetLatestSnapshotById(id, r.aggregateConverter)
     if err != nil {
         return nil, err
     }
-    events, err := r.eventStore.GetEventsByIdAndSeqNr(id, result.SeqNr, r.eventConverter)
+    events, err := r.eventStore.GetEventsByIdSinceSeqNr(id, result.SeqNr, r.eventConverter)
     if err != nil {
         return nil, err
     }
