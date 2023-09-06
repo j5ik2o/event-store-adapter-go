@@ -81,6 +81,10 @@ func (ua *userAccount) GetId() esag.AggregateId {
 	return &ua.Id
 }
 
+func (ua *userAccount) GetSeqNr() uint64 {
+	return ua.SeqNr
+}
+
 type userAccountResult struct {
 	Aggregate *userAccount
 	Event     *userAccountNameChanged

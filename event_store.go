@@ -79,9 +79,9 @@ func NewEventStore(
 }
 
 // putSnapshot returns a PutInput for snapshot.
-func (es *EventStore) putSnapshot(event Event, aggregate Aggregate) (*types.Put, error) {
+func (es *EventStore) putSnapshot(event Event, seqNr uint64, aggregate Aggregate) (*types.Put, error) {
 	pkey := es.keyResolver.ResolvePkey(event.GetAggregateId(), es.shardCount)
-	skey := es.keyResolver.ResolveSkey(event.GetAggregateId(), 0)
+	skey := es.keyResolver.ResolveSkey(event.GetAggregateId(), seqNr)
 	payload, err := es.snapshotSerializer.Serialize(aggregate)
 	if err != nil {
 		return nil, err
@@ -92,7 +92,7 @@ func (es *EventStore) putSnapshot(event Event, aggregate Aggregate) (*types.Put,
 			"pkey":    &types.AttributeValueMemberS{Value: pkey},
 			"skey":    &types.AttributeValueMemberS{Value: skey},
 			"aid":     &types.AttributeValueMemberS{Value: event.GetAggregateId().AsString()},
-			"seq_nr":  &types.AttributeValueMemberN{Value: strconv.FormatUint(event.GetSeqNr(), 10)},
+			"seq_nr":  &types.AttributeValueMemberN{Value: strconv.FormatUint(seqNr, 10)},
 			"payload": &types.AttributeValueMemberB{Value: payload},
 			"version": &types.AttributeValueMemberN{Value: "1"},
 		},
@@ -101,9 +101,9 @@ func (es *EventStore) putSnapshot(event Event, aggregate Aggregate) (*types.Put,
 }
 
 // updateSnapshot returns an UpdateInput for snapshot.
-func (es *EventStore) updateSnapshot(event Event, version uint64, aggregate Aggregate) (*types.Update, error) {
+func (es *EventStore) updateSnapshot(event Event, seqNr uint64, version uint64, aggregate Aggregate) (*types.Update, error) {
 	pkey := es.keyResolver.ResolvePkey(event.GetAggregateId(), es.shardCount)
-	skey := es.keyResolver.ResolveSkey(event.GetAggregateId(), 0)
+	skey := es.keyResolver.ResolveSkey(event.GetAggregateId(), seqNr)
 	update := types.Update{
 		TableName:        aws.String(es.snapshotTableName),
 		UpdateExpression: aws.String("SET #version=:after_version"),
@@ -128,7 +128,7 @@ func (es *EventStore) updateSnapshot(event Event, version uint64, aggregate Aggr
 		update.UpdateExpression = aws.String("SET #payload=:payload, #seq_nr=:seq_nr, #version=:after_version")
 		update.ExpressionAttributeNames["#seq_nr"] = "seq_nr"
 		update.ExpressionAttributeNames["#payload"] = "payload"
-		update.ExpressionAttributeValues[":seq_nr"] = &types.AttributeValueMemberN{Value: strconv.FormatUint(event.GetSeqNr(), 10)}
+		update.ExpressionAttributeValues[":seq_nr"] = &types.AttributeValueMemberN{Value: strconv.FormatUint(seqNr, 10)}
 		update.ExpressionAttributeValues[":payload"] = &types.AttributeValueMemberB{Value: payload}
 	}
 	return &update, nil
@@ -167,7 +167,7 @@ func (es *EventStore) GetSnapshotById(aggregateId AggregateId, converter Aggrega
 	result, err := es.client.Query(context.Background(), &dynamodb.QueryInput{
 		TableName:              aws.String(es.snapshotTableName),
 		IndexName:              aws.String(es.snapshotAidIndexName),
-		KeyConditionExpression: aws.String("#aid = :aid AND #seq_nr > :seq_nr"),
+		KeyConditionExpression: aws.String("#aid = :aid AND #seq_nr = :seq_nr"),
 		ExpressionAttributeNames: map[string]string{
 			"#aid":    "aid",
 			"#seq_nr": "seq_nr",
@@ -176,17 +176,12 @@ func (es *EventStore) GetSnapshotById(aggregateId AggregateId, converter Aggrega
 			":aid":    &types.AttributeValueMemberS{Value: aggregateId.AsString()},
 			":seq_nr": &types.AttributeValueMemberN{Value: "0"},
 		},
-		ScanIndexForward: aws.Bool(false),
-		Limit:            aws.Int32(1),
+		Limit: aws.Int32(1),
 	})
 	if err != nil {
 		return nil, err
 	}
 	if len(result.Items) == 1 {
-		seqNr, err := strconv.ParseUint(result.Items[0]["seq_nr"].(*types.AttributeValueMemberN).Value, 10, 64)
-		if err != nil {
-			return nil, err
-		}
 		version, err := strconv.ParseUint(result.Items[0]["version"].(*types.AttributeValueMemberN).Value, 10, 64)
 		if err != nil {
 			return nil, err
@@ -200,6 +195,7 @@ func (es *EventStore) GetSnapshotById(aggregateId AggregateId, converter Aggrega
 		if err != nil {
 			return nil, err
 		}
+		seqNr := aggregate.GetSeqNr()
 		return &AggregateWithSeqNrWithVersion{aggregate, seqNr, version}, nil
 	} else {
 		return nil, nil
@@ -263,7 +259,7 @@ func (es *EventStore) StoreEventWithSnapshot(event Event, version uint64, aggreg
 		if err != nil {
 			return err
 		}
-		putSnapshot, err := es.putSnapshot(event, aggregate)
+		putSnapshot, err := es.putSnapshot(event, 0, aggregate)
 		if err != nil {
 			return err
 		}
@@ -283,7 +279,7 @@ func (es *EventStore) StoreEventWithSnapshot(event Event, version uint64, aggreg
 		if err != nil {
 			return err
 		}
-		updateSnapshot, err := es.updateSnapshot(event, version, aggregate)
+		updateSnapshot, err := es.updateSnapshot(event, 0, version, aggregate)
 		if err != nil {
 			return err
 		}
