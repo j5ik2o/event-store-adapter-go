@@ -17,6 +17,8 @@ type EventStore struct {
 	journalAidIndexName  string
 	snapshotAidIndexName string
 	shardCount           uint64
+	keepSnapshot         bool
+	keepSnapshotCount    uint32
 	keyResolver          KeyResolver
 	eventSerializer      EventSerializer
 	snapshotSerializer   SnapshotSerializer
@@ -24,6 +26,20 @@ type EventStore struct {
 
 // EventStoreOption is an option for EventStore.
 type EventStoreOption func(*EventStore) error
+
+func WithKeepSnapshot(keepSnapshot bool) EventStoreOption {
+	return func(es *EventStore) error {
+		es.keepSnapshot = keepSnapshot
+		return nil
+	}
+}
+
+func WithKeepSnapshotCount(keepSnapshotCount uint32) EventStoreOption {
+	return func(es *EventStore) error {
+		es.keepSnapshotCount = keepSnapshotCount
+		return nil
+	}
+}
 
 // WithKeyResolver sets a key resolver.
 func WithKeyResolver(keyResolver KeyResolver) EventStoreOption {
@@ -66,6 +82,8 @@ func NewEventStore(
 		journalAidIndexName,
 		snapshotAidIndexName,
 		shardCount,
+		false,
+		1,
 		&DefaultKeyResolver{},
 		&JsonEventSerializer{},
 		&JsonSnapshotSerializer{},
@@ -255,43 +273,77 @@ func (es *EventStore) GetEventsByIdAndSeqNr(aggregateId AggregateId, seqNr uint6
 // Occurs an error, if the event and the snapshot can not stored.
 func (es *EventStore) StoreEventWithSnapshot(event Event, version uint64, aggregate Aggregate) error {
 	if event.IsCreated() && aggregate != nil {
-		putJournal, err := es.putJournal(event)
-		if err != nil {
-			return err
-		}
-		putSnapshot, err := es.putSnapshot(event, 0, aggregate)
-		if err != nil {
-			return err
-		}
-		_, err = es.client.TransactWriteItems(context.TODO(), &dynamodb.TransactWriteItemsInput{
-			TransactItems: []types.TransactWriteItem{
-				{Put: putSnapshot},
-				{Put: putJournal},
-			},
-		})
-		if err != nil {
-			return err
+		err2 := es.createEventWithSnapshot(event, aggregate)
+		if err2 != nil {
+			return err2
 		}
 	} else if event.IsCreated() && aggregate != nil {
 		panic("Aggregate is not found")
 	} else {
-		putJournal, err := es.putJournal(event)
+		err2 := es.updateEventWithSnapshotOpt(event, version, aggregate)
+		if err2 != nil {
+			return err2
+		}
+	}
+	return nil
+}
+
+func (es *EventStore) updateEventWithSnapshotOpt(event Event, version uint64, aggregate Aggregate) error {
+	putJournal, err := es.putJournal(event)
+	if err != nil {
+		return err
+	}
+	updateSnapshot, err := es.updateSnapshot(event, 0, version, aggregate)
+	if err != nil {
+		return err
+	}
+	transactItems := []types.TransactWriteItem{
+		{Update: updateSnapshot},
+		{Put: putJournal},
+	}
+	if es.keepSnapshot && aggregate != nil {
+		putSnapshot2, err := es.putSnapshot(event, aggregate.GetSeqNr(), aggregate)
 		if err != nil {
 			return err
 		}
-		updateSnapshot, err := es.updateSnapshot(event, 0, version, aggregate)
+		transactItems = append(transactItems, types.TransactWriteItem{Put: putSnapshot2})
+	}
+	_, err = es.client.TransactWriteItems(context.Background(), &dynamodb.TransactWriteItemsInput{
+		TransactItems: transactItems,
+	})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (es *EventStore) createEventWithSnapshot(event Event, aggregate Aggregate) error {
+	putJournal, err := es.putJournal(event)
+	if err != nil {
+		return err
+	}
+	putSnapshot, err := es.putSnapshot(event, 0, aggregate)
+	if err != nil {
+		return err
+	}
+	transactItems := []types.TransactWriteItem{
+		{Put: putSnapshot},
+		{Put: putJournal},
+	}
+
+	if es.keepSnapshot {
+		putSnapshot2, err := es.putSnapshot(event, aggregate.GetSeqNr(), aggregate)
 		if err != nil {
 			return err
 		}
-		_, err = es.client.TransactWriteItems(context.Background(), &dynamodb.TransactWriteItemsInput{
-			TransactItems: []types.TransactWriteItem{
-				{Update: updateSnapshot},
-				{Put: putJournal},
-			},
-		})
-		if err != nil {
-			return err
-		}
+		transactItems = append(transactItems, types.TransactWriteItem{Put: putSnapshot2})
+	}
+
+	_, err = es.client.TransactWriteItems(context.TODO(), &dynamodb.TransactWriteItemsInput{
+		TransactItems: transactItems,
+	})
+	if err != nil {
+		return err
 	}
 	return nil
 }
