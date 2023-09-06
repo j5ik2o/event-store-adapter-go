@@ -42,11 +42,11 @@ func Test_WriteAndRead(t *testing.T) {
 	require.Nil(t, err)
 
 	// When
-	eventStore, err := event_store_adapter_go.NewEventStore(dynamodbClient, "journal", "snapshot", "journal-aid-index", "snapshot-aid-index", 1)
+	eventStore, err := event_store_adapter_go.NewEventStore(dynamodbClient, "journal", "snapshot", "journal-aid-index", "snapshot-aid-index", 1, event_store_adapter_go.WithKeepSnapshot(true))
 	require.Nil(t, err)
 	userAccountId1 := newUserAccountId("1")
 	initial, userAccountCreated := newUserAccount(userAccountId1, "test")
-	err = eventStore.StoreEventWithSnapshot(
+	err = eventStore.StoreEventAndSnapshotOpt(
 		userAccountCreated,
 		initial.Version,
 		initial,
@@ -54,13 +54,13 @@ func Test_WriteAndRead(t *testing.T) {
 	require.Nil(t, err)
 	result, err := initial.Rename("test2")
 	require.Nil(t, err)
-	err = eventStore.StoreEventWithSnapshot(
+	err = eventStore.StoreEventAndSnapshotOpt(
 		result.Event,
 		result.Aggregate.Version,
 		nil,
 	)
 	require.Nil(t, err)
-	snapshotResult, err := eventStore.GetSnapshotById(&userAccountId1, func(m map[string]interface{}) (event_store_adapter_go.Aggregate, error) {
+	snapshotResult, err := eventStore.GetLatestSnapshotById(&userAccountId1, func(m map[string]interface{}) (event_store_adapter_go.Aggregate, error) {
 		idMap, ok := m["Id"].(map[string]interface{})
 		if !ok {
 			return nil, fmt.Errorf("Id is not a map")
@@ -78,7 +78,7 @@ func Test_WriteAndRead(t *testing.T) {
 	userAccount1, ok := snapshotResult.Aggregate.(*userAccount)
 	require.NotNil(t, ok)
 	t.Logf("UserAccount: %s, seqNr: %d, version: %d", userAccount1, snapshotResult.SeqNr, snapshotResult.Version)
-	events, err := eventStore.GetEventsByIdAndSeqNr(&userAccountId1, 0, func(m map[string]interface{}) (event_store_adapter_go.Event, error) {
+	events, err := eventStore.GetEventsByIdSinceSeqNr(&userAccountId1, 0, func(m map[string]interface{}) (event_store_adapter_go.Event, error) {
 		aggregateMap, ok := m["AggregateId"].(map[string]interface{})
 		if !ok {
 			return nil, fmt.Errorf("AggregateId is not a map")
