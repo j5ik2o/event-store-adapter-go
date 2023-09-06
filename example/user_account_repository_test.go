@@ -72,15 +72,15 @@ func newUserAccountRepository(eventStore *esag.EventStore) *userAccountRepositor
 }
 
 func (r *userAccountRepository) store(event esag.Event, version uint64, aggregate esag.Aggregate) error {
-	return r.eventStore.StoreEventWithSnapshot(event, version, aggregate)
+	return r.eventStore.StoreEventAndSnapshotOpt(event, version, aggregate)
 }
 
 func (r *userAccountRepository) findById(id esag.AggregateId) (*userAccount, error) {
-	result, err := r.eventStore.GetSnapshotById(id, r.aggregateConverter)
+	result, err := r.eventStore.GetLatestSnapshotById(id, r.aggregateConverter)
 	if err != nil {
 		return nil, err
 	}
-	events, err := r.eventStore.GetEventsByIdAndSeqNr(id, result.SeqNr, r.eventConverter)
+	events, err := r.eventStore.GetEventsByIdSinceSeqNr(id, result.SeqNr, r.eventConverter)
 	if err != nil {
 		return nil, err
 	}

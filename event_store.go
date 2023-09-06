@@ -2,7 +2,9 @@ package event_store_adapter_go
 
 import (
 	"context"
+	"math"
 	"strconv"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
@@ -19,6 +21,7 @@ type EventStore struct {
 	shardCount           uint64
 	keepSnapshot         bool
 	keepSnapshotCount    uint32
+	deleteTtl            time.Duration
 	keyResolver          KeyResolver
 	eventSerializer      EventSerializer
 	snapshotSerializer   SnapshotSerializer
@@ -84,6 +87,7 @@ func NewEventStore(
 		shardCount,
 		false,
 		1,
+		math.MaxInt64,
 		&DefaultKeyResolver{},
 		&JsonEventSerializer{},
 		&JsonSnapshotSerializer{},
@@ -175,13 +179,13 @@ func (es *EventStore) putJournal(event Event) (*types.Put, error) {
 	return &input, nil
 }
 
-// GetSnapshotById returns a snapshot by aggregateId.
+// GetLatestSnapshotById returns a snapshot by aggregateId.
 //
 // - aggregateId is an aggregateId to get a snapshot.
 // - converter is a converter to convert a map to an aggregate.
 //
 // Returns a snapshot and an error.
-func (es *EventStore) GetSnapshotById(aggregateId AggregateId, converter AggregateConverter) (*AggregateWithSeqNrWithVersion, error) {
+func (es *EventStore) GetLatestSnapshotById(aggregateId AggregateId, converter AggregateConverter) (*AggregateWithSeqNrWithVersion, error) {
 	result, err := es.client.Query(context.Background(), &dynamodb.QueryInput{
 		TableName:              aws.String(es.snapshotTableName),
 		IndexName:              aws.String(es.snapshotAidIndexName),
@@ -220,14 +224,14 @@ func (es *EventStore) GetSnapshotById(aggregateId AggregateId, converter Aggrega
 	}
 }
 
-// GetEventsByIdAndSeqNr returns events by aggregateId and seqNr.
+// GetEventsByIdSinceSeqNr returns events by aggregateId and seqNr.
 //
 // - aggregateId is an aggregateId to get events.
 // - seqNr is a seqNr to get events.
 // - converter is a converter to convert a map to an event.
 //
 // Returns events and an error.
-func (es *EventStore) GetEventsByIdAndSeqNr(aggregateId AggregateId, seqNr uint64, converter EventConverter) ([]Event, error) {
+func (es *EventStore) GetEventsByIdSinceSeqNr(aggregateId AggregateId, seqNr uint64, converter EventConverter) ([]Event, error) {
 	result, err := es.client.Query(context.Background(), &dynamodb.QueryInput{
 		TableName:              aws.String(es.journalTableName),
 		IndexName:              aws.String(es.journalAidIndexName),
@@ -262,7 +266,7 @@ func (es *EventStore) GetEventsByIdAndSeqNr(aggregateId AggregateId, seqNr uint6
 	return events, nil
 }
 
-// StoreEventWithSnapshot stores an event and a snapshot atomically.
+// StoreEventAndSnapshotOpt stores an event and a snapshot atomically.
 //
 // - event is an event to store.
 // - version is a version of the aggregate.
@@ -271,24 +275,37 @@ func (es *EventStore) GetEventsByIdAndSeqNr(aggregateId AggregateId, seqNr uint6
 //   - If you do not want to save snapshots, specify nil.
 //
 // Occurs an error, if the event and the snapshot can not stored.
-func (es *EventStore) StoreEventWithSnapshot(event Event, version uint64, aggregate Aggregate) error {
+func (es *EventStore) StoreEventAndSnapshotOpt(event Event, version uint64, aggregate Aggregate) error {
 	if event.IsCreated() && aggregate != nil {
-		err2 := es.createEventWithSnapshot(event, aggregate)
-		if err2 != nil {
-			return err2
+		err := es.createEventAndSnapshot(event, aggregate)
+		if err != nil {
+			return err
 		}
 	} else if event.IsCreated() && aggregate != nil {
 		panic("Aggregate is not found")
 	} else {
-		err2 := es.updateEventWithSnapshotOpt(event, version, aggregate)
-		if err2 != nil {
-			return err2
+		err := es.updateEventAndSnapshotOpt(event, version, aggregate)
+		if err != nil {
+			return err
+		}
+		if es.keepSnapshot && es.keepSnapshotCount > 0 {
+			if es.deleteTtl < math.MaxInt64 {
+				err = es.deleteExcessSnapshots(event.GetAggregateId())
+				if err != nil {
+					return err
+				}
+			} else {
+				err = es.updateTtlOfExcessSnapshots(event.GetAggregateId())
+				if err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil
 }
 
-func (es *EventStore) updateEventWithSnapshotOpt(event Event, version uint64, aggregate Aggregate) error {
+func (es *EventStore) updateEventAndSnapshotOpt(event Event, version uint64, aggregate Aggregate) error {
 	putJournal, err := es.putJournal(event)
 	if err != nil {
 		return err
@@ -317,7 +334,7 @@ func (es *EventStore) updateEventWithSnapshotOpt(event Event, version uint64, ag
 	return nil
 }
 
-func (es *EventStore) createEventWithSnapshot(event Event, aggregate Aggregate) error {
+func (es *EventStore) createEventAndSnapshot(event Event, aggregate Aggregate) error {
 	putJournal, err := es.putJournal(event)
 	if err != nil {
 		return err
@@ -346,4 +363,136 @@ func (es *EventStore) createEventWithSnapshot(event Event, aggregate Aggregate) 
 		return err
 	}
 	return nil
+}
+
+func (es *EventStore) deleteExcessSnapshots(aggregateId AggregateId) error {
+	if es.keepSnapshot && es.keepSnapshotCount > 0 {
+		snapshotCount, err := es.getSnapshotCount(aggregateId)
+		if err != nil {
+			return err
+		}
+		snapshotCount -= 1
+		excessCount := uint32(snapshotCount) - es.keepSnapshotCount
+		if excessCount > 0 {
+			keys, err := es.getLastSnapshotKeys(aggregateId, int32(excessCount))
+			if err != nil {
+				return err
+			}
+			var requests []types.WriteRequest
+			for _, key := range keys {
+				request := types.WriteRequest{
+					DeleteRequest: &types.DeleteRequest{
+						Key: map[string]types.AttributeValue{
+							"pkey": &types.AttributeValueMemberS{Value: key.Pkey},
+							"skey": &types.AttributeValueMemberS{Value: key.Skey},
+						},
+					},
+				}
+				requests = append(requests, request)
+			}
+			_, err = es.client.BatchWriteItem(context.Background(), &dynamodb.BatchWriteItemInput{
+				RequestItems: map[string][]types.WriteRequest{
+					es.snapshotTableName: requests,
+				},
+			})
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (es *EventStore) updateTtlOfExcessSnapshots(aggregateId AggregateId) error {
+	if es.keepSnapshot && es.keepSnapshotCount > 0 {
+		snapshotCount, err := es.getSnapshotCount(aggregateId)
+		if err != nil {
+			return err
+		}
+		snapshotCount -= 1
+		excessCount := uint32(snapshotCount) - es.keepSnapshotCount
+		if excessCount > 0 {
+			keys, err := es.getLastSnapshotKeys(aggregateId, int32(excessCount))
+			if err != nil {
+				return err
+			}
+			ttl := time.Now().Add(es.deleteTtl).Unix()
+			for _, key := range keys {
+				_, err = es.client.UpdateItem(context.Background(), &dynamodb.UpdateItemInput{
+					TableName: aws.String(es.snapshotTableName),
+					Key: map[string]types.AttributeValue{
+						"pkey": &types.AttributeValueMemberS{Value: key.Pkey},
+						"skey": &types.AttributeValueMemberS{Value: key.Skey},
+					},
+					UpdateExpression: aws.String("SET #ttl=:ttl"),
+					ExpressionAttributeNames: map[string]string{
+						"#ttl": "ttl",
+					},
+					ExpressionAttributeValues: map[string]types.AttributeValue{
+						":ttl": &types.AttributeValueMemberN{Value: strconv.FormatInt(ttl, 10)},
+					},
+				})
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (es *EventStore) getSnapshotCount(id AggregateId) (int32, error) {
+	response, err := es.client.Query(context.Background(), &dynamodb.QueryInput{
+		TableName:              aws.String(es.snapshotTableName),
+		IndexName:              aws.String(es.snapshotAidIndexName),
+		KeyConditionExpression: aws.String("#aid = :aid"),
+		ExpressionAttributeNames: map[string]string{
+			"#aid": "aid",
+		},
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":aid": &types.AttributeValueMemberS{Value: id.AsString()},
+		},
+		Select: types.SelectCount,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return response.Count, nil
+}
+
+type PkeySkey struct {
+	Pkey string
+	Skey string
+}
+
+func (es *EventStore) getLastSnapshotKeys(aid AggregateId, limit int32) ([]PkeySkey, error) {
+	response, err := es.client.Query(context.Background(), &dynamodb.QueryInput{
+		TableName:              aws.String(es.snapshotTableName),
+		IndexName:              aws.String(es.snapshotAidIndexName),
+		KeyConditionExpression: aws.String("#aid = :aid AND #seq_nr > :seq_nr"),
+		ExpressionAttributeNames: map[string]string{
+			"#aid":    "aid",
+			"#seq_nr": "seq_nr",
+		},
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":aid":    &types.AttributeValueMemberS{Value: aid.AsString()},
+			":seq_nr": &types.AttributeValueMemberN{Value: "0"},
+		},
+		ScanIndexForward: aws.Bool(false),
+		Limit:            aws.Int32(limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	var pkeySkeys []PkeySkey
+	for _, item := range response.Items {
+		pkey := item["pkey"].(*types.AttributeValueMemberS).Value
+		skey := item["skey"].(*types.AttributeValueMemberS).Value
+		pkeySkey := PkeySkey{
+			Pkey: pkey,
+			Skey: skey,
+		}
+		pkeySkeys = append(pkeySkeys, pkeySkey)
+	}
+	return pkeySkeys, nil
 }
