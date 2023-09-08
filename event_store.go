@@ -30,6 +30,13 @@ type EventStore struct {
 // EventStoreOption is an option for EventStore.
 type EventStoreOption func(*EventStore) error
 
+// WithKeepSnapshot sets whether or not to keep snapshots.
+//
+// - If you want to keep snapshots, specify true.
+// - If you do not want to keep snapshots, specify false.
+// - The default is false.
+//
+// Returns an EventStoreOption.
 func WithKeepSnapshot(keepSnapshot bool) EventStoreOption {
 	return func(es *EventStore) error {
 		es.keepSnapshot = keepSnapshot
@@ -37,6 +44,13 @@ func WithKeepSnapshot(keepSnapshot bool) EventStoreOption {
 	}
 }
 
+// WithDeleteTtl sets a delete ttl.
+//
+// - If you want to delete snapshots, specify a time.Duration.
+// - If you do not want to delete snapshots, specify math.MaxInt64.
+// - The default is math.MaxInt64.
+//
+// Returns an EventStoreOption.
 func WithDeleteTtl(deleteTtl time.Duration) EventStoreOption {
 	return func(es *EventStore) error {
 		es.deleteTtl = deleteTtl
@@ -44,6 +58,13 @@ func WithDeleteTtl(deleteTtl time.Duration) EventStoreOption {
 	}
 }
 
+// WithKeepSnapshotCount sets a keep snapshot count.
+//
+// - If you want to keep snapshots, specify a keep snapshot count.
+// - If you do not want to keep snapshots, specify math.MaxInt64.
+// - The default is math.MaxInt64.
+//
+// Returns an EventStoreOption.
 func WithKeepSnapshotCount(keepSnapshotCount uint32) EventStoreOption {
 	return func(es *EventStore) error {
 		es.keepSnapshotCount = keepSnapshotCount
@@ -52,6 +73,11 @@ func WithKeepSnapshotCount(keepSnapshotCount uint32) EventStoreOption {
 }
 
 // WithKeyResolver sets a key resolver.
+//
+// - If you want to change the key resolver, specify a KeyResolver.
+// - The default is DefaultKeyResolver.
+//
+// Returns an EventStoreOption.
 func WithKeyResolver(keyResolver KeyResolver) EventStoreOption {
 	return func(es *EventStore) error {
 		es.keyResolver = keyResolver
@@ -60,6 +86,11 @@ func WithKeyResolver(keyResolver KeyResolver) EventStoreOption {
 }
 
 // WithEventSerializer sets an event serializer.
+//
+// - If you want to change the event serializer, specify an EventSerializer.
+// - The default is JsonEventSerializer.
+//
+// Returns an EventStoreOption.
 func WithEventSerializer(eventSerializer EventSerializer) EventStoreOption {
 	return func(es *EventStore) error {
 		es.eventSerializer = eventSerializer
@@ -68,6 +99,11 @@ func WithEventSerializer(eventSerializer EventSerializer) EventStoreOption {
 }
 
 // WithSnapshotSerializer sets a snapshot serializer.
+//
+// - If you want to change the snapshot serializer, specify a SnapshotSerializer.
+// - The default is JsonSnapshotSerializer.
+//
+// Returns an EventStoreOption.
 func WithSnapshotSerializer(snapshotSerializer SnapshotSerializer) EventStoreOption {
 	return func(es *EventStore) error {
 		es.snapshotSerializer = snapshotSerializer
@@ -85,6 +121,24 @@ func NewEventStore(
 	shardCount uint64,
 	options ...EventStoreOption,
 ) (*EventStore, error) {
+	if client == nil {
+		panic("client is nil")
+	}
+	if journalTableName == "" {
+		panic("journalTableName is empty")
+	}
+	if snapshotTableName == "" {
+		panic("snapshotTableName is empty")
+	}
+	if journalAidIndexName == "" {
+		panic("journalAidIndexName is empty")
+	}
+	if snapshotAidIndexName == "" {
+		panic("snapshotAidIndexName is empty")
+	}
+	if shardCount == 0 {
+		panic("shardCount is zero")
+	}
 	es := &EventStore{
 		client,
 		journalTableName,
@@ -108,7 +162,19 @@ func NewEventStore(
 }
 
 // putSnapshot returns a PutInput for snapshot.
+//
+// - event is an event to store.
+// - seqNr is a seqNr of the event.
+// - aggregate is an aggregate to store.
+//
+// Returns a PutInput and an error.
 func (es *EventStore) putSnapshot(event Event, seqNr uint64, aggregate Aggregate) (*types.Put, error) {
+	if event == nil {
+		panic("event is nil")
+	}
+	if aggregate == nil {
+		panic("aggregate is nil")
+	}
 	pkey := es.keyResolver.ResolvePkey(event.GetAggregateId(), es.shardCount)
 	skey := es.keyResolver.ResolveSkey(event.GetAggregateId(), seqNr)
 	payload, err := es.snapshotSerializer.Serialize(aggregate)
@@ -132,7 +198,18 @@ func (es *EventStore) putSnapshot(event Event, seqNr uint64, aggregate Aggregate
 }
 
 // updateSnapshot returns an UpdateInput for snapshot.
+//
+// - event is an event to store.
+// - seqNr is a seqNr of the event.
+// - version is a version of the aggregate.
+// - aggregate is an aggregate to store.
+//   - Required when event is created, otherwise you can choose whether or not to save a snapshot.
+//
+// Returns an UpdateInput and an error.
 func (es *EventStore) updateSnapshot(event Event, seqNr uint64, version uint64, aggregate Aggregate) (*types.Update, error) {
+	if event == nil {
+		panic("event is nil")
+	}
 	pkey := es.keyResolver.ResolvePkey(event.GetAggregateId(), es.shardCount)
 	skey := es.keyResolver.ResolveSkey(event.GetAggregateId(), seqNr)
 	update := types.Update{
@@ -166,7 +243,14 @@ func (es *EventStore) updateSnapshot(event Event, seqNr uint64, version uint64, 
 }
 
 // putJournal returns a PutInput for journal.
+//
+// - event is an event to store.
+//
+// Returns a PutInput and an error.
 func (es *EventStore) putJournal(event Event) (*types.Put, error) {
+	if event == nil {
+		panic("event is nil")
+	}
 	pkey := es.keyResolver.ResolvePkey(event.GetAggregateId(), es.shardCount)
 	skey := es.keyResolver.ResolveSkey(event.GetAggregateId(), event.GetSeqNr())
 	payload, err := es.eventSerializer.Serialize(event)
@@ -195,6 +279,12 @@ func (es *EventStore) putJournal(event Event) (*types.Put, error) {
 //
 // Returns a snapshot and an error.
 func (es *EventStore) GetLatestSnapshotById(aggregateId AggregateId, converter AggregateConverter) (*AggregateWithSeqNrWithVersion, error) {
+	if aggregateId == nil {
+		panic("aggregateId is nil")
+	}
+	if converter == nil {
+		panic("converter is nil")
+	}
 	result, err := es.client.Query(context.Background(), &dynamodb.QueryInput{
 		TableName:              aws.String(es.snapshotTableName),
 		IndexName:              aws.String(es.snapshotAidIndexName),
@@ -241,6 +331,12 @@ func (es *EventStore) GetLatestSnapshotById(aggregateId AggregateId, converter A
 //
 // Returns events and an error.
 func (es *EventStore) GetEventsByIdSinceSeqNr(aggregateId AggregateId, seqNr uint64, converter EventConverter) ([]Event, error) {
+	if aggregateId == nil {
+		panic("aggregateId is nil")
+	}
+	if converter == nil {
+		panic("converter is nil")
+	}
 	result, err := es.client.Query(context.Background(), &dynamodb.QueryInput{
 		TableName:              aws.String(es.journalTableName),
 		IndexName:              aws.String(es.journalAidIndexName),
@@ -285,6 +381,9 @@ func (es *EventStore) GetEventsByIdSinceSeqNr(aggregateId AggregateId, seqNr uin
 //
 // Occurs an error, if the event and the snapshot can not stored.
 func (es *EventStore) StoreEventAndSnapshotOpt(event Event, version uint64, aggregate Aggregate) error {
+	if event == nil {
+		panic("event is nil")
+	}
 	if event.IsCreated() && aggregate != nil {
 		err := es.createEventAndSnapshot(event, aggregate)
 		if err != nil {
@@ -315,6 +414,9 @@ func (es *EventStore) StoreEventAndSnapshotOpt(event Event, version uint64, aggr
 }
 
 func (es *EventStore) updateEventAndSnapshotOpt(event Event, version uint64, aggregate Aggregate) error {
+	if event == nil {
+		panic("event is nil")
+	}
 	putJournal, err := es.putJournal(event)
 	if err != nil {
 		return err
@@ -344,6 +446,9 @@ func (es *EventStore) updateEventAndSnapshotOpt(event Event, version uint64, agg
 }
 
 func (es *EventStore) createEventAndSnapshot(event Event, aggregate Aggregate) error {
+	if event == nil {
+		panic("event is nil")
+	}
 	putJournal, err := es.putJournal(event)
 	if err != nil {
 		return err
@@ -375,6 +480,9 @@ func (es *EventStore) createEventAndSnapshot(event Event, aggregate Aggregate) e
 }
 
 func (es *EventStore) deleteExcessSnapshots(aggregateId AggregateId) error {
+	if aggregateId == nil {
+		panic("aggregateId is nil")
+	}
 	if es.keepSnapshot && es.keepSnapshotCount > 0 {
 		snapshotCount, err := es.getSnapshotCount(aggregateId)
 		if err != nil {
@@ -413,6 +521,9 @@ func (es *EventStore) deleteExcessSnapshots(aggregateId AggregateId) error {
 }
 
 func (es *EventStore) updateTtlOfExcessSnapshots(aggregateId AggregateId) error {
+	if aggregateId == nil {
+		panic("aggregateId is nil")
+	}
 	if es.keepSnapshot && es.keepSnapshotCount > 0 {
 		snapshotCount, err := es.getSnapshotCount(aggregateId)
 		if err != nil {
@@ -451,6 +562,9 @@ func (es *EventStore) updateTtlOfExcessSnapshots(aggregateId AggregateId) error 
 }
 
 func (es *EventStore) getSnapshotCount(id AggregateId) (int32, error) {
+	if id == nil {
+		panic("id is nil")
+	}
 	response, err := es.client.Query(context.Background(), &dynamodb.QueryInput{
 		TableName:              aws.String(es.snapshotTableName),
 		IndexName:              aws.String(es.snapshotAidIndexName),
@@ -475,6 +589,9 @@ type PkeySkey struct {
 }
 
 func (es *EventStore) getLastSnapshotKeys(aid AggregateId, limit int32) ([]PkeySkey, error) {
+	if aid == nil {
+		panic("aid is nil")
+	}
 	input := &dynamodb.QueryInput{
 		TableName:              aws.String(es.snapshotTableName),
 		IndexName:              aws.String(es.snapshotAidIndexName),
