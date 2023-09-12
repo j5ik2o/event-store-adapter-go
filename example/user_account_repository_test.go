@@ -80,7 +80,7 @@ func (r *userAccountRepository) findById(id esag.AggregateId) (*userAccount, err
 	if err != nil {
 		return nil, err
 	}
-	events, err := r.eventStore.GetEventsByIdSinceSeqNr(id, result.SeqNr(), r.eventConverter)
+	events, err := r.eventStore.GetEventsByIdSinceSeqNr(id, result.SeqNr()+1, r.eventConverter)
 	if err != nil {
 		return nil, err
 	}

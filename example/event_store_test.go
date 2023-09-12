@@ -87,7 +87,7 @@ func Test_WriteAndRead(t *testing.T) {
 	userAccount1, ok := snapshotResult.Aggregate().(*userAccount)
 	require.NotNil(t, ok)
 	t.Logf("UserAccount: %s, seqNr: %d, version: %d", userAccount1, snapshotResult.SeqNr(), snapshotResult.Version())
-	events, err := eventStore.GetEventsByIdSinceSeqNr(&userAccountId1, 0, func(m map[string]interface{}) (event_store_adapter_go.Event, error) {
+	events, err := eventStore.GetEventsByIdSinceSeqNr(&userAccountId1, userAccount1.GetSeqNr()+1, func(m map[string]interface{}) (event_store_adapter_go.Event, error) {
 		aggregateMap, ok := m["AggregateId"].(map[string]interface{})
 		if !ok {
 			return nil, fmt.Errorf("AggregateId is not a map")
