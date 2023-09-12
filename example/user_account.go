@@ -85,15 +85,16 @@ func (ua *userAccount) GetSeqNr() uint64 {
 	return ua.SeqNr
 }
 
+func (ua *userAccount) GetVersion() uint64 {
+	return ua.Version
+}
+
 type userAccountResult struct {
 	Aggregate *userAccount
 	Event     *userAccountNameChanged
 }
 
 func (ua *userAccount) Rename(name string) (*userAccountResult, error) {
-	if ua.Name == name {
-		panic("name is the same")
-	}
 	updatedUserAccount := *ua
 	updatedUserAccount.Name = name
 	updatedUserAccount.SeqNr += 1

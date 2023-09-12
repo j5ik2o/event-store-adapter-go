@@ -72,7 +72,27 @@ func newUserAccountRepository(eventStore *esag.EventStore) *userAccountRepositor
 }
 
 func (r *userAccountRepository) store(event esag.Event, version uint64, aggregate esag.Aggregate) error {
-	return r.eventStore.StoreEventAndSnapshotOpt(event, version, aggregate)
+	if event.IsCreated() && aggregate != nil {
+		err := r.eventStore.StoreEventAndSnapshot(event, aggregate)
+		if err != nil {
+			return err
+		}
+	} else if !event.IsCreated() {
+		if aggregate == nil {
+			err := r.eventStore.StoreEvent(event, version)
+			if err != nil {
+				return err
+			}
+		} else {
+			err := r.eventStore.StoreEventAndSnapshot(event, aggregate)
+			if err != nil {
+				return err
+			}
+		}
+	} else {
+		return fmt.Errorf("invalid argument")
+	}
+	return nil
 }
 
 func (r *userAccountRepository) findById(id esag.AggregateId) (*userAccount, error) {
@@ -80,11 +100,15 @@ func (r *userAccountRepository) findById(id esag.AggregateId) (*userAccount, err
 	if err != nil {
 		return nil, err
 	}
-	events, err := r.eventStore.GetEventsByIdSinceSeqNr(id, result.SeqNr()+1, r.eventConverter)
-	if err != nil {
-		return nil, err
+	if result.Empty() {
+		return nil, fmt.Errorf("not found")
+	} else {
+		events, err := r.eventStore.GetEventsByIdSinceSeqNr(id, result.SeqNr()+1, r.eventConverter)
+		if err != nil {
+			return nil, err
+		}
+		return replayUserAccount(events, result.Aggregate().(*userAccount), result.Version()), nil
 	}
-	return replayUserAccount(events, result.Aggregate().(*userAccount), result.Version()), nil
 }
 
 func Test_RepositoryStoreAndFindById(t *testing.T) {
@@ -130,7 +154,7 @@ func Test_RepositoryStoreAndFindById(t *testing.T) {
 	result, err := actual.Rename("test2")
 	require.Nil(t, err)
 
-	err = repository.store(result.Event, actual.Version, nil)
+	err = repository.store(result.Event, actual.Version, result.Aggregate)
 	require.Nil(t, err)
 	actual2, err := repository.findById(&initial.Id)
 	require.Nil(t, err)

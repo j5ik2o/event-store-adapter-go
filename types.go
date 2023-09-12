@@ -25,6 +25,7 @@ type Aggregate interface {
 	fmt.Stringer
 	GetId() AggregateId
 	GetSeqNr() uint64
+	GetVersion() uint64
 }
 
 type AggregateConverter func(map[string]interface{}) (Aggregate, error)
