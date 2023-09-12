@@ -342,7 +342,7 @@ func (es *EventStore) GetEventsByIdSinceSeqNr(aggregateId AggregateId, seqNr uin
 	result, err := es.client.Query(context.Background(), &dynamodb.QueryInput{
 		TableName:              aws.String(es.journalTableName),
 		IndexName:              aws.String(es.journalAidIndexName),
-		KeyConditionExpression: aws.String("#aid = :aid AND #seq_nr > :seq_nr"),
+		KeyConditionExpression: aws.String("#aid = :aid AND #seq_nr >= :seq_nr"),
 		ExpressionAttributeNames: map[string]string{
 			"#aid":    "aid",
 			"#seq_nr": "seq_nr",
