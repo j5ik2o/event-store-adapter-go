@@ -55,18 +55,16 @@ func Test_WriteAndRead(t *testing.T) {
 	require.Nil(t, err)
 	userAccountId1 := newUserAccountId("1")
 	initial, userAccountCreated := newUserAccount(userAccountId1, "test")
-	err = eventStore.StoreEventAndSnapshotOpt(
+	err = eventStore.StoreEventAndSnapshot(
 		userAccountCreated,
-		initial.Version,
 		initial,
 	)
 	require.Nil(t, err)
 	result, err := initial.Rename("test2")
 	require.Nil(t, err)
-	err = eventStore.StoreEventAndSnapshotOpt(
+	err = eventStore.StoreEvent(
 		result.Event,
 		result.Aggregate.Version,
-		nil,
 	)
 	require.Nil(t, err)
 	snapshotResult, err := eventStore.GetLatestSnapshotById(&userAccountId1, func(m map[string]interface{}) (event_store_adapter_go.Aggregate, error) {

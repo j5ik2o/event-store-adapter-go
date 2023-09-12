@@ -373,28 +373,38 @@ func (es *EventStore) GetEventsByIdSinceSeqNr(aggregateId AggregateId, seqNr uin
 	return events, nil
 }
 
-// StoreEventAndSnapshotOpt stores an event and a snapshot atomically.
-//
-// - event is an event to store.
-// - version is a version of the aggregate.
-// - aggregate is an aggregate to store.
-//   - Required when event is created, otherwise you can choose whether or not to save a snapshot.
-//   - If you do not want to save snapshots, specify nil.
-//
-// Occurs an error, if the event and the snapshot can not stored.
-func (es *EventStore) StoreEventAndSnapshotOpt(event Event, version uint64, aggregate Aggregate) error {
-	if event == nil {
-		panic("event is nil")
+func (es *EventStore) StoreEvent(event Event, version uint64) error {
+	if event.IsCreated() {
+		panic("event is created")
 	}
-	if event.IsCreated() && aggregate != nil {
+	err := es.updateEventAndSnapshotOpt(event, version, nil)
+	if err != nil {
+		return err
+	}
+	if es.keepSnapshot && es.keepSnapshotCount > 0 {
+		if es.deleteTtl < math.MaxInt64 {
+			err = es.deleteExcessSnapshots(event.GetAggregateId())
+			if err != nil {
+				return err
+			}
+		} else {
+			err = es.updateTtlOfExcessSnapshots(event.GetAggregateId())
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (es *EventStore) StoreEventAndSnapshot(event Event, aggregate Aggregate) error {
+	if event.IsCreated() {
 		err := es.createEventAndSnapshot(event, aggregate)
 		if err != nil {
 			return err
 		}
-	} else if event.IsCreated() && aggregate != nil {
-		panic("Aggregate is not found")
 	} else {
-		err := es.updateEventAndSnapshotOpt(event, version, aggregate)
+		err := es.updateEventAndSnapshotOpt(event, aggregate.GetVersion(), aggregate)
 		if err != nil {
 			return err
 		}
