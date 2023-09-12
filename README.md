@@ -28,11 +28,11 @@ func (r *UserAccountRepository) FindById(id AggregateId) (*UserAccount, error) {
     if err != nil {
         return nil, err
     }
-    events, err := r.eventStore.GetEventsByIdSinceSeqNr(id, result.SeqNr, r.eventConverter)
+    events, err := r.eventStore.GetEventsByIdSinceSeqNr(id, result.SeqNr()+1, r.eventConverter)
     if err != nil {
         return nil, err
     }
-    return ReplayUserAccount(events, result.Aggregate.(*UserAccount), result.Version), nil
+    return ReplayUserAccount(events, result.Aggregate().(*UserAccount), result.Version()), nil
 }
 ```
 
