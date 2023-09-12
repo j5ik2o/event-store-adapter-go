@@ -84,9 +84,9 @@ func Test_WriteAndRead(t *testing.T) {
 	})
 	require.Nil(t, err)
 
-	userAccount1, ok := snapshotResult.Aggregate.(*userAccount)
+	userAccount1, ok := snapshotResult.Aggregate().(*userAccount)
 	require.NotNil(t, ok)
-	t.Logf("UserAccount: %s, seqNr: %d, version: %d", userAccount1, snapshotResult.SeqNr, snapshotResult.Version)
+	t.Logf("UserAccount: %s, seqNr: %d, version: %d", userAccount1, snapshotResult.SeqNr(), snapshotResult.Version())
 	events, err := eventStore.GetEventsByIdSinceSeqNr(&userAccountId1, 0, func(m map[string]interface{}) (event_store_adapter_go.Event, error) {
 		aggregateMap, ok := m["AggregateId"].(map[string]interface{})
 		if !ok {
@@ -122,7 +122,7 @@ func Test_WriteAndRead(t *testing.T) {
 	require.Nil(t, err)
 	t.Logf("Events: %v", events)
 
-	actual := replayUserAccount(events, snapshotResult.Aggregate.(*userAccount), snapshotResult.Version)
+	actual := replayUserAccount(events, snapshotResult.Aggregate().(*userAccount), snapshotResult.Version())
 	aggregate, _ := newUserAccount(userAccountId1, "test2")
 
 	// Then

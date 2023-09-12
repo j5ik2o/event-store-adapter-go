@@ -80,11 +80,11 @@ func (r *userAccountRepository) findById(id esag.AggregateId) (*userAccount, err
 	if err != nil {
 		return nil, err
 	}
-	events, err := r.eventStore.GetEventsByIdSinceSeqNr(id, result.SeqNr, r.eventConverter)
+	events, err := r.eventStore.GetEventsByIdSinceSeqNr(id, result.SeqNr(), r.eventConverter)
 	if err != nil {
 		return nil, err
 	}
-	return replayUserAccount(events, result.Aggregate.(*userAccount), result.Version), nil
+	return replayUserAccount(events, result.Aggregate().(*userAccount), result.Version()), nil
 }
 
 func Test_RepositoryStoreAndFindById(t *testing.T) {
