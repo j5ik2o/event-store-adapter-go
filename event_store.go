@@ -302,7 +302,9 @@ func (es *EventStore) GetLatestSnapshotById(aggregateId AggregateId, converter A
 	if err != nil {
 		return nil, err
 	}
-	if len(result.Items) == 1 {
+	if len(result.Items) == 0 {
+		return &AggregateWithSeqNrWithVersion{}, nil
+	} else if len(result.Items) == 1 {
 		version, err := strconv.ParseUint(result.Items[0]["version"].(*types.AttributeValueMemberN).Value, 10, 64)
 		if err != nil {
 			return nil, err
@@ -317,9 +319,9 @@ func (es *EventStore) GetLatestSnapshotById(aggregateId AggregateId, converter A
 			return nil, err
 		}
 		seqNr := aggregate.GetSeqNr()
-		return &AggregateWithSeqNrWithVersion{aggregate, seqNr, version}, nil
+		return &AggregateWithSeqNrWithVersion{aggregate, &seqNr, &version}, nil
 	} else {
-		return nil, nil
+		panic("len(result.Items) > 1")
 	}
 }
 
