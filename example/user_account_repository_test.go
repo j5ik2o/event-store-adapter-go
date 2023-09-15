@@ -73,18 +73,18 @@ func newUserAccountRepository(eventStore *esag.EventStore) *userAccountRepositor
 
 func (r *userAccountRepository) store(event esag.Event, version uint64, aggregate esag.Aggregate) error {
 	if event.IsCreated() && aggregate != nil {
-		err := r.eventStore.StoreEventAndSnapshot(event, aggregate)
+		err := r.eventStore.PersistEventAndSnapshot(event, aggregate)
 		if err != nil {
 			return err
 		}
 	} else if !event.IsCreated() {
 		if aggregate == nil {
-			err := r.eventStore.StoreEvent(event, version)
+			err := r.eventStore.PersistEvent(event, version)
 			if err != nil {
 				return err
 			}
 		} else {
-			err := r.eventStore.StoreEventAndSnapshot(event, aggregate)
+			err := r.eventStore.PersistEventAndSnapshot(event, aggregate)
 			if err != nil {
 				return err
 			}

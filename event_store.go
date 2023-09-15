@@ -373,7 +373,7 @@ func (es *EventStore) GetEventsByIdSinceSeqNr(aggregateId AggregateId, seqNr uin
 	return events, nil
 }
 
-func (es *EventStore) StoreEvent(event Event, version uint64) error {
+func (es *EventStore) PersistEvent(event Event, version uint64) error {
 	if event.IsCreated() {
 		panic("event is created")
 	}
@@ -397,7 +397,7 @@ func (es *EventStore) StoreEvent(event Event, version uint64) error {
 	return nil
 }
 
-func (es *EventStore) StoreEventAndSnapshot(event Event, aggregate Aggregate) error {
+func (es *EventStore) PersistEventAndSnapshot(event Event, aggregate Aggregate) error {
 	if event.IsCreated() {
 		err := es.createEventAndSnapshot(event, aggregate)
 		if err != nil {

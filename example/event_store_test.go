@@ -55,14 +55,14 @@ func Test_WriteAndRead(t *testing.T) {
 	require.Nil(t, err)
 	userAccountId1 := newUserAccountId("1")
 	initial, userAccountCreated := newUserAccount(userAccountId1, "test")
-	err = eventStore.StoreEventAndSnapshot(
+	err = eventStore.PersistEventAndSnapshot(
 		userAccountCreated,
 		initial,
 	)
 	require.Nil(t, err)
 	result, err := initial.Rename("test2")
 	require.Nil(t, err)
-	err = eventStore.StoreEvent(
+	err = eventStore.PersistEvent(
 		result.Event,
 		result.Aggregate.Version,
 	)
