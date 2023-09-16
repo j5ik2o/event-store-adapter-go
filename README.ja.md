@@ -20,11 +20,11 @@ type UserAccountRepository struct {
 }
 
 func (r *UserAccountRepository) Store(event Event, version uint64) error {
-    return r.eventStore.StoreEvent(event, version)
+    return r.eventStore.PersistEvent(event, version)
 }
 
 func (r *UserAccountRepository) Store(event Event, aggregate Aggregate) error {
-    return r.eventStore.StoreEventAndSnapshot(event, aggregate)
+    return r.eventStore.PersistEventAndSnapshot(event, aggregate)
 }
 
 func (r *UserAccountRepository) FindById(id AggregateId) (*UserAccount, error) {
