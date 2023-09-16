@@ -71,28 +71,12 @@ func newUserAccountRepository(eventStore *esag.EventStore) *userAccountRepositor
 	}
 }
 
-func (r *userAccountRepository) store(event esag.Event, version uint64, aggregate esag.Aggregate) error {
-	if event.IsCreated() && aggregate != nil {
-		err := r.eventStore.PersistEventAndSnapshot(event, aggregate)
-		if err != nil {
-			return err
-		}
-	} else if !event.IsCreated() {
-		if aggregate == nil {
-			err := r.eventStore.PersistEvent(event, version)
-			if err != nil {
-				return err
-			}
-		} else {
-			err := r.eventStore.PersistEventAndSnapshot(event, aggregate)
-			if err != nil {
-				return err
-			}
-		}
-	} else {
-		return fmt.Errorf("invalid argument")
-	}
-	return nil
+func (r *userAccountRepository) storeEvent(event esag.Event, version uint64) error {
+	return r.eventStore.PersistEvent(event, version)
+}
+
+func (r *userAccountRepository) storeEventAndSnapshot(event esag.Event, aggregate esag.Aggregate) error {
+	return r.eventStore.PersistEventAndSnapshot(event, aggregate)
 }
 
 func (r *userAccountRepository) findById(id esag.AggregateId) (*userAccount, error) {
@@ -144,7 +128,7 @@ func Test_RepositoryStoreAndFindById(t *testing.T) {
 	// When
 	repository := newUserAccountRepository(eventStore)
 	initial, userAccountCreated := newUserAccount(newUserAccountId("1"), "test")
-	err = repository.store(userAccountCreated, initial.Version, initial)
+	err = repository.storeEventAndSnapshot(userAccountCreated, initial)
 	require.Nil(t, err)
 	actual, err := repository.findById(&initial.Id)
 	require.Nil(t, err)
@@ -153,8 +137,9 @@ func Test_RepositoryStoreAndFindById(t *testing.T) {
 
 	result, err := actual.Rename("test2")
 	require.Nil(t, err)
+	result.Aggregate.Version = actual.Version
 
-	err = repository.store(result.Event, actual.Version, result.Aggregate)
+	err = repository.storeEventAndSnapshot(result.Event, result.Aggregate)
 	require.Nil(t, err)
 	actual2, err := repository.findById(&initial.Id)
 	require.Nil(t, err)

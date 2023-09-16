@@ -19,9 +19,14 @@ type UserAccountRepository struct {
     eventConverter     EventConverter
 }
 
-func (r *UserAccountRepository) Store(event Event, version uint64, aggregate Aggregate) error {
-    return r.eventStore.StoreEventAndSnapshotOpt(event, version, aggregate)
+func (r *UserAccountRepository) Store(event Event, version uint64) error {
+    return r.eventStore.StoreEvent(event, version)
 }
+
+func (r *UserAccountRepository) Store(event Event, aggregate Aggregate) error {
+return r.eventStore.StoreEventAndSnapshot(event, aggregate)
+}
+
 
 func (r *UserAccountRepository) FindById(id AggregateId) (*UserAccount, error) {
     result, err := r.eventStore.GetLatestSnapshotById(id, r.aggregateConverter)
