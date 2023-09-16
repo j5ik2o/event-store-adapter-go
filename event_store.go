@@ -285,7 +285,7 @@ func (es *EventStore) GetLatestSnapshotById(aggregateId AggregateId, converter A
 	if converter == nil {
 		panic("converter is nil")
 	}
-	result, err := es.client.Query(context.Background(), &dynamodb.QueryInput{
+	request := &dynamodb.QueryInput{
 		TableName:              aws.String(es.snapshotTableName),
 		IndexName:              aws.String(es.snapshotAidIndexName),
 		KeyConditionExpression: aws.String("#aid = :aid AND #seq_nr = :seq_nr"),
@@ -298,7 +298,8 @@ func (es *EventStore) GetLatestSnapshotById(aggregateId AggregateId, converter A
 			":seq_nr": &types.AttributeValueMemberN{Value: "0"},
 		},
 		Limit: aws.Int32(1),
-	})
+	}
+	result, err := es.client.Query(context.Background(), request)
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +340,7 @@ func (es *EventStore) GetEventsByIdSinceSeqNr(aggregateId AggregateId, seqNr uin
 	if converter == nil {
 		panic("converter is nil")
 	}
-	result, err := es.client.Query(context.Background(), &dynamodb.QueryInput{
+	request := &dynamodb.QueryInput{
 		TableName:              aws.String(es.journalTableName),
 		IndexName:              aws.String(es.journalAidIndexName),
 		KeyConditionExpression: aws.String("#aid = :aid AND #seq_nr >= :seq_nr"),
@@ -351,7 +352,8 @@ func (es *EventStore) GetEventsByIdSinceSeqNr(aggregateId AggregateId, seqNr uin
 			":aid":    &types.AttributeValueMemberS{Value: aggregateId.AsString()},
 			":seq_nr": &types.AttributeValueMemberN{Value: strconv.FormatUint(seqNr, 10)},
 		},
-	})
+	}
+	result, err := es.client.Query(context.Background(), request)
 	if err != nil {
 		return nil, err
 	}
@@ -359,8 +361,7 @@ func (es *EventStore) GetEventsByIdSinceSeqNr(aggregateId AggregateId, seqNr uin
 	if len(result.Items) > 0 {
 		for _, item := range result.Items {
 			var eventMap map[string]interface{}
-			err = es.eventSerializer.Deserialize(item["payload"].(*types.AttributeValueMemberB).Value, &eventMap)
-			if err != nil {
+			if err := es.eventSerializer.Deserialize(item["payload"].(*types.AttributeValueMemberB).Value, &eventMap); err != nil {
 				return nil, err
 			}
 			event, err := converter(eventMap)
@@ -373,52 +374,44 @@ func (es *EventStore) GetEventsByIdSinceSeqNr(aggregateId AggregateId, seqNr uin
 	return events, nil
 }
 
-func (es *EventStore) StoreEvent(event Event, version uint64) error {
+func (es *EventStore) PersistEvent(event Event, version uint64) error {
 	if event.IsCreated() {
 		panic("event is created")
 	}
-	err := es.updateEventAndSnapshotOpt(event, version, nil)
-	if err != nil {
+	if err := es.updateEventAndSnapshotOpt(event, version, nil); err != nil {
 		return err
 	}
-	if es.keepSnapshot && es.keepSnapshotCount > 0 {
-		if es.deleteTtl < math.MaxInt64 {
-			err = es.deleteExcessSnapshots(event.GetAggregateId())
-			if err != nil {
-				return err
-			}
-		} else {
-			err = es.updateTtlOfExcessSnapshots(event.GetAggregateId())
-			if err != nil {
-				return err
-			}
+	if err := es.tryPurgeExcessSnapshots(event); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (es *EventStore) PersistEventAndSnapshot(event Event, aggregate Aggregate) error {
+	if event.IsCreated() {
+		if err := es.createEventAndSnapshot(event, aggregate); err != nil {
+			return err
+		}
+	} else {
+		if err := es.updateEventAndSnapshotOpt(event, aggregate.GetVersion(), aggregate); err != nil {
+			return err
+		}
+		if err := es.tryPurgeExcessSnapshots(event); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-func (es *EventStore) StoreEventAndSnapshot(event Event, aggregate Aggregate) error {
-	if event.IsCreated() {
-		err := es.createEventAndSnapshot(event, aggregate)
-		if err != nil {
-			return err
-		}
-	} else {
-		err := es.updateEventAndSnapshotOpt(event, aggregate.GetVersion(), aggregate)
-		if err != nil {
-			return err
-		}
-		if es.keepSnapshot && es.keepSnapshotCount > 0 {
-			if es.deleteTtl < math.MaxInt64 {
-				err = es.deleteExcessSnapshots(event.GetAggregateId())
-				if err != nil {
-					return err
-				}
-			} else {
-				err = es.updateTtlOfExcessSnapshots(event.GetAggregateId())
-				if err != nil {
-					return err
-				}
+func (es *EventStore) tryPurgeExcessSnapshots(event Event) error {
+	if es.keepSnapshot && es.keepSnapshotCount > 0 {
+		if es.deleteTtl < math.MaxInt64 {
+			if err := es.deleteExcessSnapshots(event.GetAggregateId()); err != nil {
+				return err
+			}
+		} else {
+			if err := es.updateTtlOfExcessSnapshots(event.GetAggregateId()); err != nil {
+				return err
 			}
 		}
 	}
@@ -448,9 +441,10 @@ func (es *EventStore) updateEventAndSnapshotOpt(event Event, version uint64, agg
 		}
 		transactItems = append(transactItems, types.TransactWriteItem{Put: putSnapshot2})
 	}
-	_, err = es.client.TransactWriteItems(context.Background(), &dynamodb.TransactWriteItemsInput{
+	request := &dynamodb.TransactWriteItemsInput{
 		TransactItems: transactItems,
-	})
+	}
+	_, err = es.client.TransactWriteItems(context.Background(), request)
 	if err != nil {
 		return err
 	}
@@ -481,11 +475,8 @@ func (es *EventStore) createEventAndSnapshot(event Event, aggregate Aggregate) e
 		}
 		transactItems = append(transactItems, types.TransactWriteItem{Put: putSnapshot2})
 	}
-
-	_, err = es.client.TransactWriteItems(context.TODO(), &dynamodb.TransactWriteItemsInput{
-		TransactItems: transactItems,
-	})
-	if err != nil {
+	request := &dynamodb.TransactWriteItemsInput{TransactItems: transactItems}
+	if _, err = es.client.TransactWriteItems(context.TODO(), request); err != nil {
 		return err
 	}
 	return nil
@@ -512,19 +503,15 @@ func (es *EventStore) deleteExcessSnapshots(aggregateId AggregateId) error {
 				request := types.WriteRequest{
 					DeleteRequest: &types.DeleteRequest{
 						Key: map[string]types.AttributeValue{
-							"pkey": &types.AttributeValueMemberS{Value: key.Pkey},
-							"skey": &types.AttributeValueMemberS{Value: key.Skey},
+							"pkey": &types.AttributeValueMemberS{Value: key.pkey},
+							"skey": &types.AttributeValueMemberS{Value: key.skey},
 						},
 					},
 				}
 				requests = append(requests, request)
 			}
-			_, err = es.client.BatchWriteItem(context.Background(), &dynamodb.BatchWriteItemInput{
-				RequestItems: map[string][]types.WriteRequest{
-					es.snapshotTableName: requests,
-				},
-			})
-			if err != nil {
+			request := &dynamodb.BatchWriteItemInput{RequestItems: map[string][]types.WriteRequest{es.snapshotTableName: requests}}
+			if _, err = es.client.BatchWriteItem(context.Background(), request); err != nil {
 				return err
 			}
 		}
@@ -550,11 +537,11 @@ func (es *EventStore) updateTtlOfExcessSnapshots(aggregateId AggregateId) error 
 			}
 			ttl := time.Now().Add(es.deleteTtl).Unix()
 			for _, key := range keys {
-				_, err = es.client.UpdateItem(context.Background(), &dynamodb.UpdateItemInput{
+				request := &dynamodb.UpdateItemInput{
 					TableName: aws.String(es.snapshotTableName),
 					Key: map[string]types.AttributeValue{
-						"pkey": &types.AttributeValueMemberS{Value: key.Pkey},
-						"skey": &types.AttributeValueMemberS{Value: key.Skey},
+						"pkey": &types.AttributeValueMemberS{Value: key.pkey},
+						"skey": &types.AttributeValueMemberS{Value: key.skey},
 					},
 					UpdateExpression: aws.String("SET #ttl=:ttl"),
 					ExpressionAttributeNames: map[string]string{
@@ -563,8 +550,8 @@ func (es *EventStore) updateTtlOfExcessSnapshots(aggregateId AggregateId) error 
 					ExpressionAttributeValues: map[string]types.AttributeValue{
 						":ttl": &types.AttributeValueMemberN{Value: strconv.FormatInt(ttl, 10)},
 					},
-				})
-				if err != nil {
+				}
+				if _, err := es.client.UpdateItem(context.Background(), request); err != nil {
 					return err
 				}
 			}
@@ -577,7 +564,7 @@ func (es *EventStore) getSnapshotCount(id AggregateId) (int32, error) {
 	if id == nil {
 		panic("id is nil")
 	}
-	response, err := es.client.Query(context.Background(), &dynamodb.QueryInput{
+	request := &dynamodb.QueryInput{
 		TableName:              aws.String(es.snapshotTableName),
 		IndexName:              aws.String(es.snapshotAidIndexName),
 		KeyConditionExpression: aws.String("#aid = :aid"),
@@ -588,23 +575,24 @@ func (es *EventStore) getSnapshotCount(id AggregateId) (int32, error) {
 			":aid": &types.AttributeValueMemberS{Value: id.AsString()},
 		},
 		Select: types.SelectCount,
-	})
+	}
+	response, err := es.client.Query(context.Background(), request)
 	if err != nil {
 		return 0, err
 	}
 	return response.Count, nil
 }
 
-type PkeySkey struct {
-	Pkey string
-	Skey string
+type pkeyAndSkey struct {
+	pkey string
+	skey string
 }
 
-func (es *EventStore) getLastSnapshotKeys(aid AggregateId, limit int32) ([]PkeySkey, error) {
+func (es *EventStore) getLastSnapshotKeys(aid AggregateId, limit int32) ([]pkeyAndSkey, error) {
 	if aid == nil {
 		panic("aid is nil")
 	}
-	input := &dynamodb.QueryInput{
+	request := &dynamodb.QueryInput{
 		TableName:              aws.String(es.snapshotTableName),
 		IndexName:              aws.String(es.snapshotAidIndexName),
 		KeyConditionExpression: aws.String("#aid = :aid AND #seq_nr > :seq_nr"),
@@ -620,21 +608,21 @@ func (es *EventStore) getLastSnapshotKeys(aid AggregateId, limit int32) ([]PkeyS
 		Limit:            aws.Int32(limit),
 	}
 	if es.deleteTtl < math.MaxInt64 {
-		input.FilterExpression = aws.String("#ttl = :ttl")
-		input.ExpressionAttributeNames["#ttl"] = "ttl"
-		input.ExpressionAttributeValues[":ttl"] = &types.AttributeValueMemberN{Value: "0"}
+		request.FilterExpression = aws.String("#ttl = :ttl")
+		request.ExpressionAttributeNames["#ttl"] = "ttl"
+		request.ExpressionAttributeValues[":ttl"] = &types.AttributeValueMemberN{Value: "0"}
 	}
-	response, err := es.client.Query(context.Background(), input)
+	response, err := es.client.Query(context.Background(), request)
 	if err != nil {
 		return nil, err
 	}
-	var pkeySkeys []PkeySkey
+	var pkeySkeys []pkeyAndSkey
 	for _, item := range response.Items {
 		pkey := item["pkey"].(*types.AttributeValueMemberS).Value
 		skey := item["skey"].(*types.AttributeValueMemberS).Value
-		pkeySkey := PkeySkey{
-			Pkey: pkey,
-			Skey: skey,
+		pkeySkey := pkeyAndSkey{
+			pkey: pkey,
+			skey: skey,
 		}
 		pkeySkeys = append(pkeySkeys, pkeySkey)
 	}

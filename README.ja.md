@@ -19,8 +19,12 @@ type UserAccountRepository struct {
     eventConverter     EventConverter
 }
 
-func (r *UserAccountRepository) Store(event Event, version uint64, aggregate Aggregate) error {
-    return r.eventStore.StoreEventWithSnapshot(event, version, aggregate)
+func (r *UserAccountRepository) Store(event Event, version uint64) error {
+    return r.eventStore.StoreEvent(event, version)
+}
+
+func (r *UserAccountRepository) Store(event Event, aggregate Aggregate) error {
+    return r.eventStore.StoreEventAndSnapshot(event, aggregate)
 }
 
 func (r *UserAccountRepository) FindById(id AggregateId) (*UserAccount, error) {
@@ -52,16 +56,16 @@ if err != nil {
 // Replay the aggregate from the event store
 userAccount2, err := repository.FindById(&initial.Id)
 if err != nil {
-	return err
+	  return err
 }
 
 // Execute a command on the aggregate
-userAccountUpdated, userAccountReanmed := userAccount2.ChangeName("test2")
+userAccountUpdated, userAccountRenamed := userAccount2.ChangeName("test2")
 
 // Store the new event without a snapshot
-err = repository.Store(userAccountReanmed, userAccountUpdated.Version, nil)
+err = repository.StoreEvent(userAccountRenamed, userAccountUpdated.Version)
 // Store the new event with a snapshot
-// err = repository.Store(userAccountReanmed, userAccountUpdated.Version, userAccountUpdated)
+// err = repository.StoreEventAndSnapshot(userAccountRenamed, userAccountUpdated)
 if err != nil {
     return err
 }
