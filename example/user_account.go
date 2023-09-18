@@ -52,12 +52,11 @@ func newUserAccount(id userAccountId, name string) (*userAccount, *userAccountCr
 	return &aggregate, newUserAccountCreated(eventId.String(), &id, aggregate.SeqNr, name, uint64(time.Now().UnixNano()))
 }
 
-func replayUserAccount(events []esag.Event, snapshot *userAccount, version uint64) *userAccount {
+func replayUserAccount(events []esag.Event, snapshot *userAccount) *userAccount {
 	result := snapshot
 	for _, event := range events {
 		result = result.applyEvent(event)
 	}
-	result.Version = version
 	return result
 }
 
@@ -87,6 +86,12 @@ func (ua *userAccount) GetSeqNr() uint64 {
 
 func (ua *userAccount) GetVersion() uint64 {
 	return ua.Version
+}
+
+func (ua *userAccount) WithVersion(version uint64) esag.Aggregate {
+	result := *ua
+	result.Version = version
+	return &result
 }
 
 type userAccountResult struct {
