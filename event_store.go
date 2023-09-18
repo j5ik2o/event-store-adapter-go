@@ -278,7 +278,7 @@ func (es *EventStore) putJournal(event Event) (*types.Put, error) {
 // - converter is a converter to convert a map to an aggregate.
 //
 // Returns a snapshot and an error.
-func (es *EventStore) GetLatestSnapshotById(aggregateId AggregateId, converter AggregateConverter) (*AggregateWithSeqNrWithVersion, error) {
+func (es *EventStore) GetLatestSnapshotById(aggregateId AggregateId, converter AggregateConverter) (*AggregateResult, error) {
 	if aggregateId == nil {
 		panic("aggregateId is nil")
 	}
@@ -304,7 +304,7 @@ func (es *EventStore) GetLatestSnapshotById(aggregateId AggregateId, converter A
 		return nil, err
 	}
 	if len(result.Items) == 0 {
-		return &AggregateWithSeqNrWithVersion{}, nil
+		return &AggregateResult{}, nil
 	} else if len(result.Items) == 1 {
 		version, err := strconv.ParseUint(result.Items[0]["version"].(*types.AttributeValueMemberN).Value, 10, 64)
 		if err != nil {
@@ -319,8 +319,7 @@ func (es *EventStore) GetLatestSnapshotById(aggregateId AggregateId, converter A
 		if err != nil {
 			return nil, err
 		}
-		seqNr := aggregate.GetSeqNr()
-		return &AggregateWithSeqNrWithVersion{aggregate, &seqNr, &version}, nil
+		return &AggregateResult{aggregate.WithVersion(version)}, nil
 	} else {
 		panic("len(result.Items) > 1")
 	}

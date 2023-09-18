@@ -26,44 +26,29 @@ type Aggregate interface {
 	GetId() AggregateId
 	GetSeqNr() uint64
 	GetVersion() uint64
+	WithVersion(version uint64) Aggregate
 }
 
 type AggregateConverter func(map[string]interface{}) (Aggregate, error)
 type EventConverter func(map[string]interface{}) (Event, error)
 
-type AggregateWithSeqNrWithVersion struct {
+type AggregateResult struct {
 	aggregate Aggregate
-	seqNr     *uint64
-	version   *uint64
 }
 
-func (awsv *AggregateWithSeqNrWithVersion) Present() bool {
-	return awsv.aggregate != nil && awsv.seqNr != nil && awsv.version != nil
+func (awsv *AggregateResult) Present() bool {
+	return awsv.aggregate != nil
 }
 
-func (awsv *AggregateWithSeqNrWithVersion) Empty() bool {
+func (awsv *AggregateResult) Empty() bool {
 	return !awsv.Present()
 }
 
-func (awsv *AggregateWithSeqNrWithVersion) Aggregate() Aggregate {
+func (awsv *AggregateResult) Aggregate() Aggregate {
 	if awsv.Empty() {
 		panic("aggregate is nil")
 	}
 	return awsv.aggregate
-}
-
-func (awsv *AggregateWithSeqNrWithVersion) SeqNr() uint64 {
-	if awsv.Empty() {
-		panic("seqNr is nil")
-	}
-	return *awsv.seqNr
-}
-
-func (awsv *AggregateWithSeqNrWithVersion) Version() uint64 {
-	if awsv.Empty() {
-		panic("version is nil")
-	}
-	return *awsv.version
 }
 
 type EventSerializer interface {

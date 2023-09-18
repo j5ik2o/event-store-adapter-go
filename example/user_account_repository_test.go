@@ -87,11 +87,11 @@ func (r *userAccountRepository) findById(id esag.AggregateId) (*userAccount, err
 	if result.Empty() {
 		return nil, fmt.Errorf("not found")
 	} else {
-		events, err := r.eventStore.GetEventsByIdSinceSeqNr(id, result.SeqNr()+1, r.eventConverter)
+		events, err := r.eventStore.GetEventsByIdSinceSeqNr(id, result.Aggregate().GetSeqNr()+1, r.eventConverter)
 		if err != nil {
 			return nil, err
 		}
-		return replayUserAccount(events, result.Aggregate().(*userAccount), result.Version()), nil
+		return replayUserAccount(events, result.Aggregate().(*userAccount)), nil
 	}
 }
 
