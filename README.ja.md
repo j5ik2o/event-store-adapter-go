@@ -27,16 +27,20 @@ func (r *UserAccountRepository) Store(event Event, aggregate Aggregate) error {
     return r.eventStore.PersistEventAndSnapshot(event, aggregate)
 }
 
-func (r *UserAccountRepository) FindById(id AggregateId) (*UserAccount, error) {
-    result, err := r.eventStore.GetSnapshotById(id, r.aggregateConverter)
-    if err != nil {
-        return nil, err
-    }
-    events, err := r.eventStore.GetEventsByIdAndSeqNr(id, result.SeqNr, r.eventConverter)
-    if err != nil {
-        return nil, err
-    }
-    return ReplayUserAccount(events, result.Aggregate.(*UserAccount), result.Version), nil
+func (r *userAccountRepository) findById(id esag.AggregateId) (*userAccount, error) {
+	result, err := r.eventStore.GetLatestSnapshotById(id, r.aggregateConverter)
+	if err != nil {
+		return nil, err
+	}
+	if result.Empty() {
+		return nil, fmt.Errorf("not found")
+	} else {
+		events, err := r.eventStore.GetEventsByIdSinceSeqNr(id, result.Aggregate().GetSeqNr()+1, r.eventConverter)
+		if err != nil {
+			return nil, err
+		}
+		return replayUserAccount(events, result.Aggregate().(*userAccount)), nil
+	}
 }
 ```
 
