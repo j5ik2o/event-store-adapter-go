@@ -43,31 +43,7 @@ func Test_WriteAndRead(t *testing.T) {
 	require.Nil(t, err)
 
 	// When
-	eventStore, err := event_store_adapter_go.NewEventStore(
-		dynamodbClient,
-		"journal",
-		"snapshot",
-		"journal-aid-index",
-		"snapshot-aid-index",
-		1,
-		event_store_adapter_go.WithKeepSnapshot(true),
-		event_store_adapter_go.WithDeleteTtl(1*time.Second))
-	require.Nil(t, err)
-	userAccountId1 := newUserAccountId("1")
-	initial, userAccountCreated := newUserAccount(userAccountId1, "test")
-	err = eventStore.PersistEventAndSnapshot(
-		userAccountCreated,
-		initial,
-	)
-	require.Nil(t, err)
-	result, err := initial.Rename("test2")
-	require.Nil(t, err)
-	err = eventStore.PersistEvent(
-		result.Event,
-		result.Aggregate.Version,
-	)
-	require.Nil(t, err)
-	snapshotResult, err := eventStore.GetLatestSnapshotById(&userAccountId1, func(m map[string]interface{}) (event_store_adapter_go.Aggregate, error) {
+	snapshotConverter := func(m map[string]interface{}) (event_store_adapter_go.Aggregate, error) {
 		idMap, ok := m["Id"].(map[string]interface{})
 		if !ok {
 			return nil, fmt.Errorf("Id is not a map")
@@ -79,13 +55,8 @@ func Test_WriteAndRead(t *testing.T) {
 		userAccountId := newUserAccountId(value)
 		result, _ := newUserAccount(userAccountId, m["Name"].(string))
 		return result, nil
-	})
-	require.Nil(t, err)
-
-	userAccount1, ok := snapshotResult.Aggregate().(*userAccount)
-	require.NotNil(t, ok)
-	t.Logf("UserAccount: %s, seqNr: %d, version: %d", userAccount1, snapshotResult.Aggregate().GetSeqNr(), snapshotResult.Aggregate().GetVersion())
-	events, err := eventStore.GetEventsByIdSinceSeqNr(&userAccountId1, userAccount1.GetSeqNr()+1, func(m map[string]interface{}) (event_store_adapter_go.Event, error) {
+	}
+	eventConverter := func(m map[string]interface{}) (event_store_adapter_go.Event, error) {
 		aggregateMap, ok := m["AggregateId"].(map[string]interface{})
 		if !ok {
 			return nil, fmt.Errorf("AggregateId is not a map")
@@ -116,7 +87,38 @@ func Test_WriteAndRead(t *testing.T) {
 		default:
 			return nil, fmt.Errorf("unknown event type")
 		}
-	})
+	}
+	eventStore, err := event_store_adapter_go.NewEventStore(
+		dynamodbClient,
+		"journal",
+		"snapshot",
+		"journal-aid-index",
+		"snapshot-aid-index",
+		1,
+		event_store_adapter_go.WithKeepSnapshot(true),
+		event_store_adapter_go.WithDeleteTtl(1*time.Second))
+	require.Nil(t, err)
+	userAccountId1 := newUserAccountId("1")
+	initial, userAccountCreated := newUserAccount(userAccountId1, "test")
+	err = eventStore.PersistEventAndSnapshot(
+		userAccountCreated,
+		initial,
+	)
+	require.Nil(t, err)
+	result, err := initial.Rename("test2")
+	require.Nil(t, err)
+	err = eventStore.PersistEvent(
+		result.Event,
+		result.Aggregate.Version,
+	)
+	require.Nil(t, err)
+	snapshotResult, err := eventStore.GetLatestSnapshotById(&userAccountId1, snapshotConverter)
+	require.Nil(t, err)
+
+	userAccount1, ok := snapshotResult.Aggregate().(*userAccount)
+	require.NotNil(t, ok)
+	t.Logf("UserAccount: %s, seqNr: %d, version: %d", userAccount1, snapshotResult.Aggregate().GetSeqNr(), snapshotResult.Aggregate().GetVersion())
+	events, err := eventStore.GetEventsByIdSinceSeqNr(&userAccountId1, userAccount1.GetSeqNr()+1, eventConverter)
 	require.Nil(t, err)
 	t.Logf("Events: %v", events)
 
