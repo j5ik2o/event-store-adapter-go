@@ -60,3 +60,28 @@ type SnapshotSerializer interface {
 	Serialize(aggregate Aggregate) ([]byte, error)
 	Deserialize(data []byte, aggregateMap *map[string]interface{}) error
 }
+
+type EventStoreBaseError struct {
+	Message string
+	cause   error
+}
+
+func (e *EventStoreBaseError) Error() string {
+	return e.Message
+}
+
+type TransactionCanceledError struct {
+	EventStoreBaseError
+}
+
+type SerializationError struct {
+	EventStoreBaseError
+}
+
+type DeserializationError struct {
+	EventStoreBaseError
+}
+
+type IOError struct {
+	EventStoreBaseError
+}

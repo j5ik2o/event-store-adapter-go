@@ -2,6 +2,7 @@ package event_store_adapter_go
 
 import (
 	"context"
+	"errors"
 	"math"
 	"strconv"
 	"time"
@@ -179,7 +180,7 @@ func (es *EventStore) putSnapshot(event Event, seqNr uint64, aggregate Aggregate
 	skey := es.keyResolver.ResolveSkey(event.GetAggregateId(), seqNr)
 	payload, err := es.snapshotSerializer.Serialize(aggregate)
 	if err != nil {
-		return nil, err
+		return nil, &SerializationError{EventStoreBaseError{"Failed to serialize the payload", err}}
 	}
 	input := types.Put{
 		TableName: aws.String(es.snapshotTableName),
@@ -231,7 +232,7 @@ func (es *EventStore) updateSnapshot(event Event, seqNr uint64, version uint64, 
 	if aggregate != nil {
 		payload, err := es.snapshotSerializer.Serialize(aggregate)
 		if err != nil {
-			return nil, err
+			return nil, &SerializationError{EventStoreBaseError{"Failed to serialize the payload", err}}
 		}
 		update.UpdateExpression = aws.String("SET #payload=:payload, #seq_nr=:seq_nr, #version=:after_version")
 		update.ExpressionAttributeNames["#seq_nr"] = "seq_nr"
@@ -255,7 +256,7 @@ func (es *EventStore) putJournal(event Event) (*types.Put, error) {
 	skey := es.keyResolver.ResolveSkey(event.GetAggregateId(), event.GetSeqNr())
 	payload, err := es.eventSerializer.Serialize(event)
 	if err != nil {
-		return nil, err
+		return nil, &SerializationError{EventStoreBaseError{"Failed to serialize the event", err}}
 	}
 	input := types.Put{
 		TableName: aws.String(es.journalTableName),
@@ -301,23 +302,23 @@ func (es *EventStore) GetLatestSnapshotById(aggregateId AggregateId, converter A
 	}
 	result, err := es.client.Query(context.Background(), request)
 	if err != nil {
-		return nil, err
+		return nil, &IOError{EventStoreBaseError{"Failed to GetLatestSnapshotById query", err}}
 	}
 	if len(result.Items) == 0 {
 		return &AggregateResult{}, nil
 	} else if len(result.Items) == 1 {
 		version, err := strconv.ParseUint(result.Items[0]["version"].(*types.AttributeValueMemberN).Value, 10, 64)
 		if err != nil {
-			return nil, err
+			return nil, &DeserializationError{EventStoreBaseError{"Failed to parse the version", err}}
 		}
 		var aggregateMap map[string]interface{}
 		err = es.snapshotSerializer.Deserialize(result.Items[0]["payload"].(*types.AttributeValueMemberB).Value, &aggregateMap)
 		if err != nil {
-			return nil, err
+			return nil, &DeserializationError{EventStoreBaseError{"Failed to deserialize the snapshot", err}}
 		}
 		aggregate, err := converter(aggregateMap)
 		if err != nil {
-			return nil, err
+			return nil, &DeserializationError{EventStoreBaseError{"Failed to convert the snapshot", err}}
 		}
 		return &AggregateResult{aggregate.WithVersion(version)}, nil
 	} else {
@@ -354,18 +355,18 @@ func (es *EventStore) GetEventsByIdSinceSeqNr(aggregateId AggregateId, seqNr uin
 	}
 	result, err := es.client.Query(context.Background(), request)
 	if err != nil {
-		return nil, err
+		return nil, &IOError{EventStoreBaseError{"Failed to GetEventsByIdSinceSeqNr query", err}}
 	}
 	var events []Event
 	if len(result.Items) > 0 {
 		for _, item := range result.Items {
 			var eventMap map[string]interface{}
 			if err := es.eventSerializer.Deserialize(item["payload"].(*types.AttributeValueMemberB).Value, &eventMap); err != nil {
-				return nil, err
+				return nil, &DeserializationError{EventStoreBaseError{"Failed to deserialize the event", err}}
 			}
 			event, err := converter(eventMap)
 			if err != nil {
-				return nil, err
+				return nil, &DeserializationError{EventStoreBaseError{"Failed to convert the event", err}}
 			}
 			events = append(events, event)
 		}
@@ -445,7 +446,13 @@ func (es *EventStore) updateEventAndSnapshotOpt(event Event, version uint64, agg
 	}
 	_, err = es.client.TransactWriteItems(context.Background(), request)
 	if err != nil {
-		return err
+		var t *types.TransactionCanceledException
+		switch {
+		case errors.As(err, &t):
+			return &TransactionCanceledError{EventStoreBaseError{"Transaction write was canceled", err}}
+		default:
+			return &IOError{EventStoreBaseError{"Failed to transact write items", err}}
+		}
 	}
 	return nil
 }
@@ -476,7 +483,13 @@ func (es *EventStore) createEventAndSnapshot(event Event, aggregate Aggregate) e
 	}
 	request := &dynamodb.TransactWriteItemsInput{TransactItems: transactItems}
 	if _, err = es.client.TransactWriteItems(context.TODO(), request); err != nil {
-		return err
+		var t *types.TransactionCanceledException
+		switch {
+		case errors.As(err, &t):
+			return &TransactionCanceledError{EventStoreBaseError{"Transaction write was canceled", err}}
+		default:
+			return &IOError{EventStoreBaseError{"Failed to transact write items", err}}
+		}
 	}
 	return nil
 }
@@ -511,7 +524,7 @@ func (es *EventStore) deleteExcessSnapshots(aggregateId AggregateId) error {
 			}
 			request := &dynamodb.BatchWriteItemInput{RequestItems: map[string][]types.WriteRequest{es.snapshotTableName: requests}}
 			if _, err = es.client.BatchWriteItem(context.Background(), request); err != nil {
-				return err
+				return &IOError{EventStoreBaseError{"Failed to deleteExcessSnapshots updateItem", err}}
 			}
 		}
 	}
@@ -551,7 +564,7 @@ func (es *EventStore) updateTtlOfExcessSnapshots(aggregateId AggregateId) error 
 					},
 				}
 				if _, err := es.client.UpdateItem(context.Background(), request); err != nil {
-					return err
+					return &IOError{EventStoreBaseError{"Failed to updateTtlOfExcessSnapshots updateItem", err}}
 				}
 			}
 		}
@@ -577,7 +590,7 @@ func (es *EventStore) getSnapshotCount(id AggregateId) (int32, error) {
 	}
 	response, err := es.client.Query(context.Background(), request)
 	if err != nil {
-		return 0, err
+		return 0, &IOError{EventStoreBaseError{"Failed to getSnapshotCount query", err}}
 	}
 	return response.Count, nil
 }
@@ -613,7 +626,7 @@ func (es *EventStore) getLastSnapshotKeys(aid AggregateId, limit int32) ([]pkeyA
 	}
 	response, err := es.client.Query(context.Background(), request)
 	if err != nil {
-		return nil, err
+		return nil, &IOError{EventStoreBaseError{"Failed to getLastSnapshotKeys query", err}}
 	}
 	var pkeySkeys []pkeyAndSkey
 	for _, item := range response.Items {
