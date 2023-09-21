@@ -180,7 +180,7 @@ func (es *EventStore) putSnapshot(event Event, seqNr uint64, aggregate Aggregate
 	skey := es.keyResolver.ResolveSkey(event.GetAggregateId(), seqNr)
 	payload, err := es.snapshotSerializer.Serialize(aggregate)
 	if err != nil {
-		return nil, &SerializationError{EventStoreBaseError{"Failed to serialize the payload", err}}
+		return nil, err
 	}
 	input := types.Put{
 		TableName: aws.String(es.snapshotTableName),
@@ -232,7 +232,7 @@ func (es *EventStore) updateSnapshot(event Event, seqNr uint64, version uint64, 
 	if aggregate != nil {
 		payload, err := es.snapshotSerializer.Serialize(aggregate)
 		if err != nil {
-			return nil, &SerializationError{EventStoreBaseError{"Failed to serialize the payload", err}}
+			return nil, err
 		}
 		update.UpdateExpression = aws.String("SET #payload=:payload, #seq_nr=:seq_nr, #version=:after_version")
 		update.ExpressionAttributeNames["#seq_nr"] = "seq_nr"
@@ -256,7 +256,7 @@ func (es *EventStore) putJournal(event Event) (*types.Put, error) {
 	skey := es.keyResolver.ResolveSkey(event.GetAggregateId(), event.GetSeqNr())
 	payload, err := es.eventSerializer.Serialize(event)
 	if err != nil {
-		return nil, &SerializationError{EventStoreBaseError{"Failed to serialize the event", err}}
+		return nil, err
 	}
 	input := types.Put{
 		TableName: aws.String(es.journalTableName),
@@ -314,7 +314,7 @@ func (es *EventStore) GetLatestSnapshotById(aggregateId AggregateId, converter A
 		var aggregateMap map[string]interface{}
 		err = es.snapshotSerializer.Deserialize(result.Items[0]["payload"].(*types.AttributeValueMemberB).Value, &aggregateMap)
 		if err != nil {
-			return nil, &DeserializationError{EventStoreBaseError{"Failed to deserialize the snapshot", err}}
+			return nil, err
 		}
 		aggregate, err := converter(aggregateMap)
 		if err != nil {
@@ -362,7 +362,7 @@ func (es *EventStore) GetEventsByIdSinceSeqNr(aggregateId AggregateId, seqNr uin
 		for _, item := range result.Items {
 			var eventMap map[string]interface{}
 			if err := es.eventSerializer.Deserialize(item["payload"].(*types.AttributeValueMemberB).Value, &eventMap); err != nil {
-				return nil, &DeserializationError{EventStoreBaseError{"Failed to deserialize the event", err}}
+				return nil, err
 			}
 			event, err := converter(eventMap)
 			if err != nil {
