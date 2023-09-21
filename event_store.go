@@ -405,11 +405,11 @@ func (es *EventStore) PersistEventAndSnapshot(event Event, aggregate Aggregate) 
 func (es *EventStore) tryPurgeExcessSnapshots(event Event) error {
 	if es.keepSnapshot && es.keepSnapshotCount > 0 {
 		if es.deleteTtl < math.MaxInt64 {
-			if err := es.deleteExcessSnapshots(event.GetAggregateId()); err != nil {
+			if err := es.updateTtlOfExcessSnapshots(event.GetAggregateId()); err != nil {
 				return err
 			}
 		} else {
-			if err := es.updateTtlOfExcessSnapshots(event.GetAggregateId()); err != nil {
+			if err := es.deleteExcessSnapshots(event.GetAggregateId()); err != nil {
 				return err
 			}
 		}
