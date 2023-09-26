@@ -6,7 +6,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.21.0
 	github.com/aws/aws-sdk-go-v2/config v1.18.42
 	github.com/aws/aws-sdk-go-v2/credentials v1.13.40
-	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.21.5
+	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.22.0
 	github.com/docker/go-connections v0.4.0
 	github.com/oklog/ulid/v2 v2.1.0
 	github.com/stretchr/testify v1.8.4
