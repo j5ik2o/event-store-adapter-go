@@ -20,6 +20,8 @@ type EventStore struct {
 	journalAidIndexName  string
 	snapshotAidIndexName string
 	shardCount           uint64
+	eventConverter       EventConverter
+	snapshotConverter    AggregateConverter
 	keepSnapshot         bool
 	keepSnapshotCount    uint32
 	deleteTtl            time.Duration
@@ -120,6 +122,8 @@ func NewEventStore(
 	journalAidIndexName string,
 	snapshotAidIndexName string,
 	shardCount uint64,
+	eventConverter EventConverter,
+	snapshotConverter AggregateConverter,
 	options ...EventStoreOption,
 ) (*EventStore, error) {
 	if client == nil {
@@ -147,6 +151,8 @@ func NewEventStore(
 		journalAidIndexName,
 		snapshotAidIndexName,
 		shardCount,
+		eventConverter,
+		snapshotConverter,
 		false,
 		1,
 		math.MaxInt64,
@@ -279,12 +285,9 @@ func (es *EventStore) putJournal(event Event) (*types.Put, error) {
 // - converter is a converter to convert a map to an aggregate.
 //
 // Returns a snapshot and an error.
-func (es *EventStore) GetLatestSnapshotById(aggregateId AggregateId, converter AggregateConverter) (*AggregateResult, error) {
+func (es *EventStore) GetLatestSnapshotById(aggregateId AggregateId) (*AggregateResult, error) {
 	if aggregateId == nil {
 		panic("aggregateId is nil")
-	}
-	if converter == nil {
-		panic("converter is nil")
 	}
 	request := &dynamodb.QueryInput{
 		TableName:              aws.String(es.snapshotTableName),
@@ -316,7 +319,7 @@ func (es *EventStore) GetLatestSnapshotById(aggregateId AggregateId, converter A
 		if err != nil {
 			return nil, err
 		}
-		aggregate, err := converter(aggregateMap)
+		aggregate, err := es.snapshotConverter(aggregateMap)
 		if err != nil {
 			return nil, &DeserializationError{EventStoreBaseError{"Failed to convert the snapshot", err}}
 		}
@@ -333,12 +336,9 @@ func (es *EventStore) GetLatestSnapshotById(aggregateId AggregateId, converter A
 // - converter is a converter to convert a map to an event.
 //
 // Returns events and an error.
-func (es *EventStore) GetEventsByIdSinceSeqNr(aggregateId AggregateId, seqNr uint64, converter EventConverter) ([]Event, error) {
+func (es *EventStore) GetEventsByIdSinceSeqNr(aggregateId AggregateId, seqNr uint64) ([]Event, error) {
 	if aggregateId == nil {
 		panic("aggregateId is nil")
-	}
-	if converter == nil {
-		panic("converter is nil")
 	}
 	request := &dynamodb.QueryInput{
 		TableName:              aws.String(es.journalTableName),
@@ -364,7 +364,7 @@ func (es *EventStore) GetEventsByIdSinceSeqNr(aggregateId AggregateId, seqNr uin
 			if err := es.eventSerializer.Deserialize(item["payload"].(*types.AttributeValueMemberB).Value, &eventMap); err != nil {
 				return nil, err
 			}
-			event, err := converter(eventMap)
+			event, err := es.eventConverter(eventMap)
 			if err != nil {
 				return nil, &DeserializationError{EventStoreBaseError{"Failed to convert the event", err}}
 			}

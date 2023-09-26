@@ -1,4 +1,4 @@
-package example
+package test
 
 import (
 	"context"
@@ -15,59 +15,12 @@ import (
 )
 
 type userAccountRepository struct {
-	eventStore         *esag.EventStore
-	aggregateConverter esag.AggregateConverter
-	eventConverter     esag.EventConverter
+	eventStore *esag.EventStore
 }
 
 func newUserAccountRepository(eventStore *esag.EventStore) *userAccountRepository {
 	return &userAccountRepository{
 		eventStore: eventStore,
-		aggregateConverter: func(m map[string]interface{}) (esag.Aggregate, error) {
-			idMap, ok := m["Id"].(map[string]interface{})
-			if !ok {
-				return nil, fmt.Errorf("Id is not a map")
-			}
-			value, ok := idMap["Value"].(string)
-			if !ok {
-				return nil, fmt.Errorf("Value is not a float64")
-			}
-			userAccountId := newUserAccountId(value)
-			result, _ := newUserAccount(userAccountId, m["Name"].(string))
-			return result, nil
-		},
-		eventConverter: func(m map[string]interface{}) (esag.Event, error) {
-			aggregateMap, ok := m["AggregateId"].(map[string]interface{})
-			if !ok {
-				return nil, fmt.Errorf("AggregateId is not a map")
-			}
-			aggregateId, ok := aggregateMap["Value"].(string)
-			if !ok {
-				return nil, fmt.Errorf("Value is not a float64")
-			}
-			switch m["TypeName"].(string) {
-			case "UserAccountCreated":
-				userAccountId := newUserAccountId(aggregateId)
-				return newUserAccountCreated(
-					m["Id"].(string),
-					&userAccountId,
-					uint64(m["SeqNr"].(float64)),
-					m["Name"].(string),
-					uint64(m["OccurredAt"].(float64)),
-				), nil
-			case "UserAccountNameChanged":
-				userAccountId := newUserAccountId(aggregateId)
-				return newUserAccountNameChanged(
-					m["Id"].(string),
-					&userAccountId,
-					uint64(m["SeqNr"].(float64)),
-					m["Name"].(string),
-					uint64(m["OccurredAt"].(float64)),
-				), nil
-			default:
-				return nil, fmt.Errorf("unknown event type")
-			}
-		},
 	}
 }
 
@@ -80,14 +33,14 @@ func (r *userAccountRepository) storeEventAndSnapshot(event esag.Event, aggregat
 }
 
 func (r *userAccountRepository) findById(id esag.AggregateId) (*userAccount, error) {
-	result, err := r.eventStore.GetLatestSnapshotById(id, r.aggregateConverter)
+	result, err := r.eventStore.GetLatestSnapshotById(id)
 	if err != nil {
 		return nil, err
 	}
 	if result.Empty() {
 		return nil, fmt.Errorf("not found")
 	} else {
-		events, err := r.eventStore.GetEventsByIdSinceSeqNr(id, result.Aggregate().GetSeqNr()+1, r.eventConverter)
+		events, err := r.eventStore.GetEventsByIdSinceSeqNr(id, result.Aggregate().GetSeqNr()+1)
 		if err != nil {
 			return nil, err
 		}
@@ -122,7 +75,62 @@ func Test_RepositoryStoreAndFindById(t *testing.T) {
 	require.Nil(t, err)
 	err = common.CreateSnapshotTable(t, ctx, dynamodbClient, "snapshot", "snapshot-aid-index")
 	require.Nil(t, err)
-	eventStore, err := esag.NewEventStore(dynamodbClient, "journal", "snapshot", "journal-aid-index", "snapshot-aid-index", 1)
+
+	eventConverter := func(m map[string]interface{}) (esag.Event, error) {
+		aggregateMap, ok := m["AggregateId"].(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("AggregateId is not a map")
+		}
+		aggregateId, ok := aggregateMap["Value"].(string)
+		if !ok {
+			return nil, fmt.Errorf("Value is not a float64")
+		}
+		switch m["TypeName"].(string) {
+		case "UserAccountCreated":
+			userAccountId := newUserAccountId(aggregateId)
+			return newUserAccountCreated(
+				m["Id"].(string),
+				&userAccountId,
+				uint64(m["SeqNr"].(float64)),
+				m["Name"].(string),
+				uint64(m["OccurredAt"].(float64)),
+			), nil
+		case "UserAccountNameChanged":
+			userAccountId := newUserAccountId(aggregateId)
+			return newUserAccountNameChanged(
+				m["Id"].(string),
+				&userAccountId,
+				uint64(m["SeqNr"].(float64)),
+				m["Name"].(string),
+				uint64(m["OccurredAt"].(float64)),
+			), nil
+		default:
+			return nil, fmt.Errorf("unknown event type")
+		}
+	}
+	aggregateConverter := func(m map[string]interface{}) (esag.Aggregate, error) {
+		idMap, ok := m["Id"].(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("Id is not a map")
+		}
+		value, ok := idMap["Value"].(string)
+		if !ok {
+			return nil, fmt.Errorf("Value is not a float64")
+		}
+		userAccountId := newUserAccountId(value)
+		result, _ := newUserAccount(userAccountId, m["Name"].(string))
+		return result, nil
+	}
+
+	eventStore, err := esag.NewEventStore(
+		dynamodbClient,
+		"journal",
+		"snapshot",
+		"journal-aid-index",
+		"snapshot-aid-index",
+		1,
+		eventConverter,
+		aggregateConverter)
 	require.Nil(t, err)
 
 	// When
