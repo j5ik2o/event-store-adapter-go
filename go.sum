@@ -199,6 +199,8 @@ github.com/testcontainers/testcontainers-go/modules/localstack v0.24.0 h1:1nlSA+
 github.com/testcontainers/testcontainers-go/modules/localstack v0.24.0/go.mod h1:yxmgSW0CxwapTb7CdCusfos5kUrIeZEn7nId2uc+R00=
 github.com/testcontainers/testcontainers-go/modules/localstack v0.24.1 h1:c3cj4saOd2UMUi35S7YbJDEpq2YQ50fffSsgObvLP1c=
 github.com/testcontainers/testcontainers-go/modules/localstack v0.24.1/go.mod h1:Jj/LdUgnCAEoIKPb/VpsXI06N83jkWPXsOvV75Tq6jY=
+github.com/testcontainers/testcontainers-go/modules/localstack v0.25.0 h1:mRiCTRG+15PhgjxqTko2Z4RF6gCwJY+UQN20u5I2OaQ=
+github.com/testcontainers/testcontainers-go/modules/localstack v0.25.0/go.mod h1:KXAesFnqIz2u28+WEhsZQiuqiaUt3+dZIE/eHHygEuA=
 github.com/tklauser/go-sysconf v0.3.11 h1:89WgdJhk5SNwJfu+GKyYveZ4IaJ7xAkecBo+KdJV0CM=
 github.com/tklauser/go-sysconf v0.3.11/go.mod h1:GqXfhXY3kiPa0nAXPDIQIWzJbMCB7AmcWpGR8lSZfqI=
 github.com/tklauser/go-sysconf v0.3.12 h1:0QaGUFOdQaIVdPgfITYzaTegZvdCjmYO52cSFAEVmqU=
