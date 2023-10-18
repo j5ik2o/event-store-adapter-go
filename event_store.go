@@ -450,7 +450,7 @@ func (es *EventStore) updateEventAndSnapshotOpt(event Event, version uint64, agg
 		switch {
 		case errors.As(err, &t):
 			for _, reason := range t.CancellationReasons {
-				if *reason.Code == "ConditionalCheckFailed" {
+				if reason.Code != nil && *reason.Code == "ConditionalCheckFailed" {
 					return &OptimisticLockError{EventStoreBaseError{"Transaction write was canceled due to conditional check failure", err}}
 				}
 			}
@@ -492,7 +492,7 @@ func (es *EventStore) createEventAndSnapshot(event Event, aggregate Aggregate) e
 		switch {
 		case errors.As(err, &t):
 			for _, reason := range t.CancellationReasons {
-				if *reason.Code == "ConditionalCheckFailed" {
+				if reason.Code != nil && *reason.Code == "ConditionalCheckFailed" {
 					return &OptimisticLockError{EventStoreBaseError{"Transaction write was canceled due to conditional check failure", err}}
 				}
 			}
