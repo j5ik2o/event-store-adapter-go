@@ -449,7 +449,12 @@ func (es *EventStore) updateEventAndSnapshotOpt(event Event, version uint64, agg
 		var t *types.TransactionCanceledException
 		switch {
 		case errors.As(err, &t):
-			return &TransactionCanceledError{EventStoreBaseError{"Transaction write was canceled", err}}
+			for _, reason := range t.CancellationReasons {
+				if *reason.Code == "ConditionalCheckFailed" {
+					return &OptimisticLockError{EventStoreBaseError{"Transaction write was canceled due to conditional check failure", err}}
+				}
+			}
+			return &IOError{EventStoreBaseError{"Failed to transact write items", err}}
 		default:
 			return &IOError{EventStoreBaseError{"Failed to transact write items", err}}
 		}
@@ -486,7 +491,12 @@ func (es *EventStore) createEventAndSnapshot(event Event, aggregate Aggregate) e
 		var t *types.TransactionCanceledException
 		switch {
 		case errors.As(err, &t):
-			return &TransactionCanceledError{EventStoreBaseError{"Transaction write was canceled", err}}
+			for _, reason := range t.CancellationReasons {
+				if *reason.Code == "ConditionalCheckFailed" {
+					return &OptimisticLockError{EventStoreBaseError{"Transaction write was canceled due to conditional check failure", err}}
+				}
+			}
+			return &IOError{EventStoreBaseError{"Failed to transact write items", err}}
 		default:
 			return &IOError{EventStoreBaseError{"Failed to transact write items", err}}
 		}
