@@ -70,7 +70,7 @@ func (e *EventStoreBaseError) Error() string {
 	return e.Message
 }
 
-type TransactionCanceledError struct {
+type OptimisticLockError struct {
 	EventStoreBaseError
 }
 
