@@ -454,7 +454,7 @@ func (es *EventStore) updateEventAndSnapshotOpt(event Event, version uint64, agg
 					return &OptimisticLockError{EventStoreBaseError{"Transaction write was canceled due to conditional check failure", err}}
 				}
 			}
-			return &IOError{EventStoreBaseError{"Failed to transact write items", err}}
+			return &IOError{EventStoreBaseError{"Failed to transact write items due to non-conditional check failure", err}}
 		default:
 			return &IOError{EventStoreBaseError{"Failed to transact write items", err}}
 		}
@@ -496,7 +496,7 @@ func (es *EventStore) createEventAndSnapshot(event Event, aggregate Aggregate) e
 					return &OptimisticLockError{EventStoreBaseError{"Transaction write was canceled due to conditional check failure", err}}
 				}
 			}
-			return &IOError{EventStoreBaseError{"Failed to transact write items", err}}
+			return &IOError{EventStoreBaseError{"Failed to transact write items due to non-conditional check failure", err}}
 		default:
 			return &IOError{EventStoreBaseError{"Failed to transact write items", err}}
 		}
