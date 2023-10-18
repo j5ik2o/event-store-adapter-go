@@ -91,7 +91,7 @@ func WithKeyResolver(keyResolver KeyResolver) EventStoreOption {
 // WithEventSerializer sets an event serializer.
 //
 // - If you want to change the event serializer, specify an EventSerializer.
-// - The default is JsonEventSerializer.
+// - The default is DefaultEventSerializer.
 //
 // Returns an EventStoreOption.
 func WithEventSerializer(eventSerializer EventSerializer) EventStoreOption {
@@ -104,7 +104,7 @@ func WithEventSerializer(eventSerializer EventSerializer) EventStoreOption {
 // WithSnapshotSerializer sets a snapshot serializer.
 //
 // - If you want to change the snapshot serializer, specify a SnapshotSerializer.
-// - The default is JsonSnapshotSerializer.
+// - The default is DefaultSnapshotSerializer.
 //
 // Returns an EventStoreOption.
 func WithSnapshotSerializer(snapshotSerializer SnapshotSerializer) EventStoreOption {
@@ -157,8 +157,8 @@ func NewEventStore(
 		1,
 		math.MaxInt64,
 		&DefaultKeyResolver{},
-		&JsonEventSerializer{},
-		&JsonSnapshotSerializer{},
+		&DefaultEventSerializer{},
+		&DefaultSnapshotSerializer{},
 	}
 	for _, option := range options {
 		if err := option(es); err != nil {
