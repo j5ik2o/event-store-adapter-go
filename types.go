@@ -63,7 +63,7 @@ type SnapshotSerializer interface {
 
 type EventStoreBaseError struct {
 	Message string
-	cause   error
+	Cause   error
 }
 
 func (e *EventStoreBaseError) Error() string {
@@ -74,14 +74,30 @@ type OptimisticLockError struct {
 	EventStoreBaseError
 }
 
+func NewOptimisticLockError(message string, cause error) *OptimisticLockError {
+	return &OptimisticLockError{EventStoreBaseError{message, cause}}
+}
+
 type SerializationError struct {
 	EventStoreBaseError
+}
+
+func NewSerializationError(message string, cause error) *SerializationError {
+	return &SerializationError{EventStoreBaseError{message, cause}}
 }
 
 type DeserializationError struct {
 	EventStoreBaseError
 }
 
+func NewDeserializationError(message string, cause error) *DeserializationError {
+	return &DeserializationError{EventStoreBaseError{message, cause}}
+}
+
 type IOError struct {
 	EventStoreBaseError
+}
+
+func NewIOError(message string, cause error) *IOError {
+	return &IOError{EventStoreBaseError{message, cause}}
 }
