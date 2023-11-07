@@ -127,22 +127,22 @@ func NewEventStore(
 	options ...EventStoreOption,
 ) (*EventStore, error) {
 	if client == nil {
-		panic("client is nil")
+		return nil, errors.New("client is nil")
 	}
 	if journalTableName == "" {
-		panic("journalTableName is empty")
+		return nil, errors.New("journalTableName is empty")
 	}
 	if snapshotTableName == "" {
-		panic("snapshotTableName is empty")
+		return nil, errors.New("snapshotTableName is empty")
 	}
 	if journalAidIndexName == "" {
-		panic("journalAidIndexName is empty")
+		return nil, errors.New("journalAidIndexName is empty")
 	}
 	if snapshotAidIndexName == "" {
-		panic("snapshotAidIndexName is empty")
+		return nil, errors.New("snapshotAidIndexName is empty")
 	}
 	if shardCount == 0 {
-		panic("shardCount is zero")
+		return nil, errors.New("shardCount is zero")
 	}
 	es := &EventStore{
 		client,
@@ -177,10 +177,10 @@ func NewEventStore(
 // Returns a PutInput and an error.
 func (es *EventStore) putSnapshot(event Event, seqNr uint64, aggregate Aggregate) (*types.Put, error) {
 	if event == nil {
-		panic("event is nil")
+		return nil, errors.New("event is nil")
 	}
 	if aggregate == nil {
-		panic("aggregate is nil")
+		return nil, errors.New("aggregate is nil")
 	}
 	pkey := es.keyResolver.ResolvePkey(event.GetAggregateId(), es.shardCount)
 	skey := es.keyResolver.ResolveSkey(event.GetAggregateId(), seqNr)
@@ -215,7 +215,7 @@ func (es *EventStore) putSnapshot(event Event, seqNr uint64, aggregate Aggregate
 // Returns an UpdateInput and an error.
 func (es *EventStore) updateSnapshot(event Event, seqNr uint64, version uint64, aggregate Aggregate) (*types.Update, error) {
 	if event == nil {
-		panic("event is nil")
+		return nil, errors.New("event is nil")
 	}
 	pkey := es.keyResolver.ResolvePkey(event.GetAggregateId(), es.shardCount)
 	skey := es.keyResolver.ResolveSkey(event.GetAggregateId(), seqNr)
@@ -256,7 +256,7 @@ func (es *EventStore) updateSnapshot(event Event, seqNr uint64, version uint64, 
 // Returns a PutInput and an error.
 func (es *EventStore) putJournal(event Event) (*types.Put, error) {
 	if event == nil {
-		panic("event is nil")
+		return nil, errors.New("event is nil")
 	}
 	pkey := es.keyResolver.ResolvePkey(event.GetAggregateId(), es.shardCount)
 	skey := es.keyResolver.ResolveSkey(event.GetAggregateId(), event.GetSeqNr())
@@ -287,7 +287,7 @@ func (es *EventStore) putJournal(event Event) (*types.Put, error) {
 // Returns a snapshot and an error.
 func (es *EventStore) GetLatestSnapshotById(aggregateId AggregateId) (*AggregateResult, error) {
 	if aggregateId == nil {
-		panic("aggregateId is nil")
+		return nil, errors.New("aggregateId is nil")
 	}
 	request := &dynamodb.QueryInput{
 		TableName:              aws.String(es.snapshotTableName),
@@ -305,14 +305,14 @@ func (es *EventStore) GetLatestSnapshotById(aggregateId AggregateId) (*Aggregate
 	}
 	result, err := es.client.Query(context.Background(), request)
 	if err != nil {
-		return nil, &IOError{EventStoreBaseError{"Failed to GetLatestSnapshotById query", err}}
+		return nil, NewIOError("Failed to GetLatestSnapshotById query", err)
 	}
 	if len(result.Items) == 0 {
 		return &AggregateResult{}, nil
 	} else if len(result.Items) == 1 {
 		version, err := strconv.ParseUint(result.Items[0]["version"].(*types.AttributeValueMemberN).Value, 10, 64)
 		if err != nil {
-			return nil, &DeserializationError{EventStoreBaseError{"Failed to parse the version", err}}
+			return nil, NewDeserializationError("Failed to parse the version", err)
 		}
 		var aggregateMap map[string]interface{}
 		err = es.snapshotSerializer.Deserialize(result.Items[0]["payload"].(*types.AttributeValueMemberB).Value, &aggregateMap)
@@ -321,7 +321,7 @@ func (es *EventStore) GetLatestSnapshotById(aggregateId AggregateId) (*Aggregate
 		}
 		aggregate, err := es.snapshotConverter(aggregateMap)
 		if err != nil {
-			return nil, &DeserializationError{EventStoreBaseError{"Failed to convert the snapshot", err}}
+			return nil, NewDeserializationError("Failed to convert the snapshot", err)
 		}
 		return &AggregateResult{aggregate.WithVersion(version)}, nil
 	} else {
@@ -355,7 +355,7 @@ func (es *EventStore) GetEventsByIdSinceSeqNr(aggregateId AggregateId, seqNr uin
 	}
 	result, err := es.client.Query(context.Background(), request)
 	if err != nil {
-		return nil, &IOError{EventStoreBaseError{"Failed to GetEventsByIdSinceSeqNr query", err}}
+		return nil, NewIOError("Failed to GetEventsByIdSinceSeqNr query", err)
 	}
 	var events []Event
 	if len(result.Items) > 0 {
@@ -366,7 +366,7 @@ func (es *EventStore) GetEventsByIdSinceSeqNr(aggregateId AggregateId, seqNr uin
 			}
 			event, err := es.eventConverter(eventMap)
 			if err != nil {
-				return nil, &DeserializationError{EventStoreBaseError{"Failed to convert the event", err}}
+				return nil, NewDeserializationError("Failed to convert the event", err)
 			}
 			events = append(events, event)
 		}
@@ -451,12 +451,12 @@ func (es *EventStore) updateEventAndSnapshotOpt(event Event, version uint64, agg
 		case errors.As(err, &t):
 			for _, reason := range t.CancellationReasons {
 				if reason.Code != nil && *reason.Code == "ConditionalCheckFailed" {
-					return &OptimisticLockError{EventStoreBaseError{"Transaction write was canceled due to conditional check failure", err}}
+					return NewOptimisticLockError("Transaction write was canceled due to conditional check failure", err)
 				}
 			}
-			return &IOError{EventStoreBaseError{"Failed to transact write items due to non-conditional check failure", err}}
+			return NewIOError("Failed to transact write items due to non-conditional check failure", err)
 		default:
-			return &IOError{EventStoreBaseError{"Failed to transact write items", err}}
+			return NewIOError("Failed to transact write items", err)
 		}
 	}
 	return nil
@@ -464,7 +464,7 @@ func (es *EventStore) updateEventAndSnapshotOpt(event Event, version uint64, agg
 
 func (es *EventStore) createEventAndSnapshot(event Event, aggregate Aggregate) error {
 	if event == nil {
-		panic("event is nil")
+		return errors.New("event is nil")
 	}
 	putJournal, err := es.putJournal(event)
 	if err != nil {
@@ -493,12 +493,12 @@ func (es *EventStore) createEventAndSnapshot(event Event, aggregate Aggregate) e
 		case errors.As(err, &t):
 			for _, reason := range t.CancellationReasons {
 				if reason.Code != nil && *reason.Code == "ConditionalCheckFailed" {
-					return &OptimisticLockError{EventStoreBaseError{"Transaction write was canceled due to conditional check failure", err}}
+					return NewOptimisticLockError("Transaction write was canceled due to conditional check failure", err)
 				}
 			}
-			return &IOError{EventStoreBaseError{"Failed to transact write items due to non-conditional check failure", err}}
+			return NewIOError("Failed to transact write items due to non-conditional check failure", err)
 		default:
-			return &IOError{EventStoreBaseError{"Failed to transact write items", err}}
+			return NewIOError("Failed to transact write items", err)
 		}
 	}
 	return nil
@@ -506,7 +506,7 @@ func (es *EventStore) createEventAndSnapshot(event Event, aggregate Aggregate) e
 
 func (es *EventStore) deleteExcessSnapshots(aggregateId AggregateId) error {
 	if aggregateId == nil {
-		panic("aggregateId is nil")
+		return errors.New("aggregateId is nil")
 	}
 	if es.keepSnapshot && es.keepSnapshotCount > 0 {
 		snapshotCount, err := es.getSnapshotCount(aggregateId)
@@ -534,7 +534,7 @@ func (es *EventStore) deleteExcessSnapshots(aggregateId AggregateId) error {
 			}
 			request := &dynamodb.BatchWriteItemInput{RequestItems: map[string][]types.WriteRequest{es.snapshotTableName: requests}}
 			if _, err = es.client.BatchWriteItem(context.Background(), request); err != nil {
-				return &IOError{EventStoreBaseError{"Failed to deleteExcessSnapshots updateItem", err}}
+				return NewIOError("Failed to deleteExcessSnapshots updateItem", err)
 			}
 		}
 	}
@@ -543,7 +543,7 @@ func (es *EventStore) deleteExcessSnapshots(aggregateId AggregateId) error {
 
 func (es *EventStore) updateTtlOfExcessSnapshots(aggregateId AggregateId) error {
 	if aggregateId == nil {
-		panic("aggregateId is nil")
+		return errors.New("aggregateId is nil")
 	}
 	if es.keepSnapshot && es.keepSnapshotCount > 0 {
 		snapshotCount, err := es.getSnapshotCount(aggregateId)
@@ -574,7 +574,7 @@ func (es *EventStore) updateTtlOfExcessSnapshots(aggregateId AggregateId) error 
 					},
 				}
 				if _, err := es.client.UpdateItem(context.Background(), request); err != nil {
-					return &IOError{EventStoreBaseError{"Failed to updateTtlOfExcessSnapshots updateItem", err}}
+					return NewIOError("Failed to updateTtlOfExcessSnapshots updateItem", err)
 				}
 			}
 		}
@@ -582,9 +582,9 @@ func (es *EventStore) updateTtlOfExcessSnapshots(aggregateId AggregateId) error 
 	return nil
 }
 
-func (es *EventStore) getSnapshotCount(id AggregateId) (int32, error) {
-	if id == nil {
-		panic("id is nil")
+func (es *EventStore) getSnapshotCount(aggregateId AggregateId) (int32, error) {
+	if aggregateId == nil {
+		return 0, errors.New("aggregateId is nil")
 	}
 	request := &dynamodb.QueryInput{
 		TableName:              aws.String(es.snapshotTableName),
@@ -594,13 +594,13 @@ func (es *EventStore) getSnapshotCount(id AggregateId) (int32, error) {
 			"#aid": "aid",
 		},
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":aid": &types.AttributeValueMemberS{Value: id.AsString()},
+			":aid": &types.AttributeValueMemberS{Value: aggregateId.AsString()},
 		},
 		Select: types.SelectCount,
 	}
 	response, err := es.client.Query(context.Background(), request)
 	if err != nil {
-		return 0, &IOError{EventStoreBaseError{"Failed to getSnapshotCount query", err}}
+		return 0, NewIOError("Failed to getSnapshotCount query", err)
 	}
 	return response.Count, nil
 }
@@ -610,9 +610,9 @@ type pkeyAndSkey struct {
 	skey string
 }
 
-func (es *EventStore) getLastSnapshotKeys(aid AggregateId, limit int32) ([]pkeyAndSkey, error) {
-	if aid == nil {
-		panic("aid is nil")
+func (es *EventStore) getLastSnapshotKeys(aggregateId AggregateId, limit int32) ([]pkeyAndSkey, error) {
+	if aggregateId == nil {
+		return nil, errors.New("aggregateId is nil")
 	}
 	request := &dynamodb.QueryInput{
 		TableName:              aws.String(es.snapshotTableName),
@@ -623,7 +623,7 @@ func (es *EventStore) getLastSnapshotKeys(aid AggregateId, limit int32) ([]pkeyA
 			"#seq_nr": "seq_nr",
 		},
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":aid":    &types.AttributeValueMemberS{Value: aid.AsString()},
+			":aid":    &types.AttributeValueMemberS{Value: aggregateId.AsString()},
 			":seq_nr": &types.AttributeValueMemberN{Value: "0"},
 		},
 		ScanIndexForward: aws.Bool(false),
@@ -636,7 +636,7 @@ func (es *EventStore) getLastSnapshotKeys(aid AggregateId, limit int32) ([]pkeyA
 	}
 	response, err := es.client.Query(context.Background(), request)
 	if err != nil {
-		return nil, &IOError{EventStoreBaseError{"Failed to getLastSnapshotKeys query", err}}
+		return nil, NewIOError("Failed to getLastSnapshotKeys query", err)
 	}
 	var pkeySkeys []pkeyAndSkey
 	for _, item := range response.Items {
