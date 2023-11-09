@@ -3,7 +3,7 @@ module github.com/j5ik2o/event-store-adapter-go
 go 1.20
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.22.1
+	github.com/aws/aws-sdk-go-v2 v1.22.2
 	github.com/aws/aws-sdk-go-v2/config v1.22.2
 	github.com/aws/aws-sdk-go-v2/credentials v1.15.1
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.25.0
