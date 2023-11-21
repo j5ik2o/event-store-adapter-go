@@ -69,6 +69,8 @@ github.com/aws/aws-sdk-go-v2/config v1.25.2 h1:+Gy7Xe372Tw/PiUw3We94Le9IwU1tmJqC
 github.com/aws/aws-sdk-go-v2/config v1.25.2/go.mod h1:6hFlwWQiVOUG0Ej2ql0tG4zPlpDH++HD0WT1MA6l5Q4=
 github.com/aws/aws-sdk-go-v2/config v1.25.3 h1:E4m9LbwJOoncDNt3e9MPLbz/saxWcGUlZVBydydD6+8=
 github.com/aws/aws-sdk-go-v2/config v1.25.3/go.mod h1:tAByZy03nH5jcq0vZmkcVoo6tRzRHEwSFx3QW4NmDw8=
+github.com/aws/aws-sdk-go-v2/config v1.25.4 h1:r+X1x8QI6FEPdJDWCNBDZHyAcyFwSjHN8q8uuus+Axs=
+github.com/aws/aws-sdk-go-v2/config v1.25.4/go.mod h1:8GTjImECskr7D88P/Nn9uM4M4rLY9i77hLJZgkZEWV8=
 github.com/aws/aws-sdk-go-v2/credentials v1.13.37 h1:BvEdm09+ZEh2XtN+PVHPcYwKY3wIeB6pw7vPRM4M9/U=
 github.com/aws/aws-sdk-go-v2/credentials v1.13.37/go.mod h1:ACLrdkd4CLZyXOghZ8IYumQbcooAcp2jo/s2xsFH8IM=
 github.com/aws/aws-sdk-go-v2/credentials v1.13.38 h1:gDAuCdVlA4lmmgQhvpZlscwicloCqH44vkxLklGkQLA=
