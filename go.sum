@@ -191,6 +191,8 @@ github.com/aws/aws-sdk-go-v2/service/dynamodb v1.25.1 h1:bqSGIS7Nk5EfMKTNDgtaukJ
 github.com/aws/aws-sdk-go-v2/service/dynamodb v1.25.1/go.mod h1:Fe7bvO6LxNp6WA6y5VmbgW9RRu+g0RlCXpFAmtcHfQs=
 github.com/aws/aws-sdk-go-v2/service/dynamodb v1.25.2 h1:O6ff5PwwgQ7QkL/XA0H+0U0mWwjkYaP9tHvbr0Ptqak=
 github.com/aws/aws-sdk-go-v2/service/dynamodb v1.25.2/go.mod h1:kuVxCbsxbP/h6YTT2BfOj4s/bwXYsG3C/8Qn9gO5QJY=
+github.com/aws/aws-sdk-go-v2/service/dynamodb v1.25.3 h1:f5MV/o9V143ZKOxDh/+LLcufe4F8B3gdfg4c5Nwasyg=
+github.com/aws/aws-sdk-go-v2/service/dynamodb v1.25.3/go.mod h1:p8SrrAzcuXBoLEgNI7NEw5eHFyvkvEPABS3jSE8xOZg=
 github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.9.14 h1:m0QTSI6pZYJTk5WSKx3fm5cNW/DCicVzULBgU/6IyD0=
 github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.9.14/go.mod h1:dDilntgHy9WnHXsh7dDtUPgHKEfTJIBUTHM8OWm0f/0=
 github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.9.15 h1:7R8uRYyXzdD71KWVCL78lJZltah6VVznXBazvKjfH58=
@@ -213,6 +215,8 @@ github.com/aws/aws-sdk-go-v2/service/internal/endpoint-discovery v1.8.2 h1:M2oj5
 github.com/aws/aws-sdk-go-v2/service/internal/endpoint-discovery v1.8.2/go.mod h1:fcLhoxFM7KEONrUI5zY12MncXr53tHHwQOckCOrX8A4=
 github.com/aws/aws-sdk-go-v2/service/internal/endpoint-discovery v1.8.3 h1:AakYQhCXteXSRHebRAGDKf/P+3kmEWwiyE3Um/d0ecg=
 github.com/aws/aws-sdk-go-v2/service/internal/endpoint-discovery v1.8.3/go.mod h1:wt1Ib9UX0A8fxifnkYLrv7RAlg+ziPR8Fo0NqzuJkHI=
+github.com/aws/aws-sdk-go-v2/service/internal/endpoint-discovery v1.8.4 h1:yUrVjtoH+5aA7h8qFVvVOBv03K5XIcgR3r1y1lH5raw=
+github.com/aws/aws-sdk-go-v2/service/internal/endpoint-discovery v1.8.4/go.mod h1:g10w17faXf5sqTZt8+Bu/9PIUopwgcYZDb9jvsl8M9E=
 github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.9.35 h1:CdzPW9kKitgIiLV1+MHobfR5Xg25iYnyzWZhyQuSlDI=
 github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.9.35/go.mod h1:QGF2Rs33W5MaN9gYdEQOBBFPLwTZkEhRwI33f7KIG0o=
 github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.9.36 h1:YXlm7LxwNlauqb2OrinWlcvtsflTzP8GaMvYfQBhoT4=
