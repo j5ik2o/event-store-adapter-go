@@ -31,6 +31,8 @@ github.com/aws/aws-sdk-go-v2 v1.23.2 h1:UoTll1Y5b88x8h53OlsJGgOHwpggdMr7UVnLjMb3
 github.com/aws/aws-sdk-go-v2 v1.23.2/go.mod h1:i1XDttT4rnf6vxc9AuskLc6s7XBee8rlLilKlc03uAA=
 github.com/aws/aws-sdk-go-v2 v1.23.4 h1:2P20ZjH0ouSAu/6yZep8oCmTReathLuEu6dwoqEgjts=
 github.com/aws/aws-sdk-go-v2 v1.23.4/go.mod h1:t3szzKfP0NeRU27uBFczDivYJjsmSnqI8kIvKyWb9ds=
+github.com/aws/aws-sdk-go-v2 v1.23.5 h1:xK6C4udTyDMd82RFvNkDQxtAd00xlzFUtX4fF2nMZyg=
+github.com/aws/aws-sdk-go-v2 v1.23.5/go.mod h1:t3szzKfP0NeRU27uBFczDivYJjsmSnqI8kIvKyWb9ds=
 github.com/aws/aws-sdk-go-v2/config v1.18.39 h1:oPVyh6fuu/u4OiW4qcuQyEtk7U7uuNBmHmJSLg1AJsQ=
 github.com/aws/aws-sdk-go-v2/config v1.18.39/go.mod h1:+NH/ZigdPckFpgB1TRcRuWCB/Kbbvkxc/iNAKTq5RhE=
 github.com/aws/aws-sdk-go-v2/config v1.18.40 h1:dbu1llI/nTIL+r6sYHMeVLl99DM8J8/o1I4EPurnhLg=
