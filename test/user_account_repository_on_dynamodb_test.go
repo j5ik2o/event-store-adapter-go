@@ -15,10 +15,10 @@ import (
 )
 
 type userAccountRepository struct {
-	eventStore *esag.EventStore
+	eventStore esag.EventStore
 }
 
-func newUserAccountRepository(eventStore *esag.EventStore) *userAccountRepository {
+func newUserAccountRepository(eventStore esag.EventStore) *userAccountRepository {
 	return &userAccountRepository{
 		eventStore: eventStore,
 	}
@@ -48,7 +48,7 @@ func (r *userAccountRepository) findById(id esag.AggregateId) (*userAccount, err
 	}
 }
 
-func Test_RepositoryStoreAndFindById(t *testing.T) {
+func Test_Repository_DynamoDB_StoreAndFindById(t *testing.T) {
 	// Given
 	ctx := context.Background()
 	container, err := localstack.RunContainer(
@@ -122,7 +122,7 @@ func Test_RepositoryStoreAndFindById(t *testing.T) {
 		return result, nil
 	}
 
-	eventStore, err := esag.NewEventStore(
+	eventStore, err := esag.NewEventStoreOnDynamoDB(
 		dynamodbClient,
 		"journal",
 		"snapshot",
