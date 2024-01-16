@@ -11,7 +11,11 @@ func NewEventStoreOnMemory() *EventStoreOnMemory {
 }
 
 func (es *EventStoreOnMemory) GetLatestSnapshotById(aggregateId AggregateId) (*AggregateResult, error) {
-	return &AggregateResult{es.snapshots[aggregateId.AsString()]}, nil
+	snapshot := es.snapshots[aggregateId.AsString()]
+	if snapshot != nil {
+		return &AggregateResult{aggregate: snapshot}, nil
+	}
+	return &AggregateResult{}, nil
 }
 
 func (es *EventStoreOnMemory) GetEventsByIdSinceSeqNr(aggregateId AggregateId, seqNr uint64) ([]Event, error) {
