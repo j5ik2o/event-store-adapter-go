@@ -55,16 +55,15 @@ func Test_Repository_OnMemory_StoreAndFindById(t *testing.T) {
 	actual, err := repository.findById(&initial.Id)
 	require.Nil(t, err)
 
-	assert.Equal(t, actual, initial)
+	assert.Equal(t, initial, actual)
 
 	result, err := actual.Rename("test2")
 	require.Nil(t, err)
-	result.Aggregate.Version = actual.Version
 
 	err = repository.storeEventAndSnapshot(result.Event, result.Aggregate)
 	require.Nil(t, err)
 	actual2, err := repository.findById(&initial.Id)
 	require.Nil(t, err)
-	assert.Equal(t, actual2.Name, "test2")
+	assert.Equal(t, "test2", actual2.Name)
 
 }

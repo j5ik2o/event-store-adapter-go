@@ -13,6 +13,7 @@ func NewEventStoreOnMemory() *EventStoreOnMemory {
 func (es *EventStoreOnMemory) GetLatestSnapshotById(aggregateId AggregateId) (*AggregateResult, error) {
 	snapshot := es.snapshots[aggregateId.AsString()]
 	if snapshot != nil {
+		// snapshot = snapshot.WithVersion(es.versions[aggregateId.AsString()])
 		return &AggregateResult{aggregate: snapshot}, nil
 	}
 	return &AggregateResult{}, nil
@@ -35,7 +36,17 @@ func (es *EventStoreOnMemory) PersistEvent(event Event, version uint64) error {
 	if es.versions[event.GetAggregateId().AsString()] != version {
 		return NewOptimisticLockError("Transaction write was canceled due to conditional check failure", nil)
 	}
+	var newVersion uint64
+	if event.IsCreated() {
+		newVersion = 1
+	} else {
+		newVersion = es.versions[event.GetAggregateId().AsString()] + 1
+	}
 	es.events[event.GetAggregateId().AsString()] = append(es.events[event.GetAggregateId().AsString()], event)
+	snapshot := es.snapshots[event.GetAggregateId().AsString()]
+	snapshot = snapshot.WithVersion(newVersion)
+	es.snapshots[event.GetAggregateId().AsString()] = snapshot
+	es.versions[event.GetAggregateId().AsString()] = newVersion
 	return nil
 }
 
@@ -46,8 +57,14 @@ func (es *EventStoreOnMemory) PersistEventAndSnapshot(event Event, aggregate Agg
 			return NewOptimisticLockError("Transaction write was canceled due to conditional check failure", nil)
 		}
 	}
+	var newVersion uint64
+	if event.IsCreated() {
+		newVersion = 1
+	} else {
+		newVersion = es.versions[event.GetAggregateId().AsString()] + 1
+	}
 	es.events[event.GetAggregateId().AsString()] = append(es.events[event.GetAggregateId().AsString()], event)
-	es.snapshots[event.GetAggregateId().AsString()] = aggregate
-	es.versions[event.GetAggregateId().AsString()] = aggregate.GetVersion()
+	es.snapshots[event.GetAggregateId().AsString()] = aggregate.WithVersion(newVersion)
+	es.versions[event.GetAggregateId().AsString()] = newVersion
 	return nil
 }
