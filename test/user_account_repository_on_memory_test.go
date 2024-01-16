@@ -13,7 +13,7 @@ type userAccountRepositoryOnMemory struct {
 	eventStore esag.EventStore
 }
 
-func newUserAccountyOnMemory(eventStore esag.EventStore) *userAccountRepository {
+func newUserAccountOnMemory(eventStore esag.EventStore) *userAccountRepository {
 	return &userAccountRepository{
 		eventStore: eventStore,
 	}
