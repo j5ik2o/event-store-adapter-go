@@ -33,7 +33,7 @@ func (r *userAccountRepositoryOnMemory) findById(id esag.AggregateId) (*userAcco
 		return nil, err
 	}
 	if result.Empty() {
-		return nil, fmt.Errorf("not found")
+		return nil, fmt.Errorf("user account with id %s not found", id)
 	} else {
 		events, err := r.eventStore.GetEventsByIdSinceSeqNr(id, result.Aggregate().GetSeqNr()+1)
 		if err != nil {
