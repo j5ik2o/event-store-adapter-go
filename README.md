@@ -49,7 +49,7 @@ func (r *userAccountRepository) findById(id esag.AggregateId) (*userAccount, err
 The following is an example of the repository usage
 
 ```go
-eventStore := NewEventStore(dynamodbClient, "journal", "snapshot", "journal-aid-index", "snapshot-aid-index", 1)
+eventStore := NewEventStoreOnDynamoDB(dynamodbClient, "journal", "snapshot", "journal-aid-index", "snapshot-aid-index", 1)
 repository := NewUserAccountRepository(eventStore)
 
 userAccount1, userAccountCreated := NewUserAccount(UserAccountId{Value: "1"}, "test")
