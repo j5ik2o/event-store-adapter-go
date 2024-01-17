@@ -50,6 +50,7 @@ The following is an example of the repository usage
 
 ```go
 eventStore, err := NewEventStoreOnDynamoDB(dynamodbClient, "journal", "snapshot", "journal-aid-index", "snapshot-aid-index", 1)
+// eventStore := NewEventStoreOnMemory() // if use repository for on-memory
 if err != nil {
     return err
 }
