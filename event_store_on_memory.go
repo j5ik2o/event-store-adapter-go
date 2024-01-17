@@ -23,7 +23,7 @@ func (es *EventStoreOnMemory) GetEventsByIdSinceSeqNr(aggregateId AggregateId, s
 	result := make([]Event, 0)
 	for _, event := range es.events[aggregateId.AsString()] {
 		if event.GetSeqNr() >= seqNr {
-			result = append(result, event.(Event))
+			result = append(result, event)
 		}
 	}
 	return result, nil
