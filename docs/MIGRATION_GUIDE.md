@@ -13,12 +13,12 @@ This guide details the necessary changes for migrating from version `0.4.21` to 
 
   **Before:**
   ```go
-  eventStore := NewEventStore(dynamodbClient, "journal", "snapshot", ...)
+  eventStore, err := NewEventStore(dynamodbClient, "journal", "snapshot", ...)
   ```
 
   **After:**
   ```go
-  eventStore := NewEventStoreOnDynamoDB(dynamodbClient, "journal", "snapshot", ...)
+  eventStore, err := NewEventStoreOnDynamoDB(dynamodbClient, "journal", "snapshot", ...)
   ```
 
 - Interface Implementation:
