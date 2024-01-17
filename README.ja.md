@@ -16,16 +16,16 @@ EventStoreを使えば、Event Sourcing対応リポジトリを簡単に実装�
 
 ```go
 type UserAccountRepository struct {
-    eventStore         EventStore
-    aggregateConverter AggregateConverter
-    eventConverter     EventConverter
+    eventStore         esag.EventStore
+    aggregateConverter esag.AggregateConverter
+    eventConverter     esag.EventConverter
 }
 
-func (r *UserAccountRepository) Store(event Event, version uint64) error {
+func (r *UserAccountRepository) StoreEvent(event esag.Event, version uint64) error {
     return r.eventStore.PersistEvent(event, version)
 }
 
-func (r *UserAccountRepository) Store(event Event, aggregate Aggregate) error {
+func (r *UserAccountRepository) StoreEventAndSnapshot(event esag.Event, aggregate esag.Aggregate) error {
     return r.eventStore.PersistEventAndSnapshot(event, aggregate)
 }
 
@@ -58,7 +58,7 @@ repository := NewUserAccountRepository(eventStore)
 
 userAccount1, userAccountCreated := NewUserAccount(UserAccountId{Value: "1"}, "test")
 // Store an aggregate with a create event
-err = repository.Store(userAccountCreated, userAccount1.Version, userAccount1)
+err = repository.StoreEvent(userAccountCreated, userAccount1.Version, userAccount1)
 if err != nil {
     return err
 }
