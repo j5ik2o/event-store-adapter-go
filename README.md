@@ -81,6 +81,10 @@ if err != nil {
 
 See [docs/DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md).
 
+## Migration Guide
+
+See [docs/MIGRATION_GUIDE.md](docs/MIGRATION_GUIDE.md).
+
 ## License.
 
 MIT License. See [LICENSE](LICENSE) for details.
