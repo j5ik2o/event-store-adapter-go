@@ -49,7 +49,6 @@ func (r *userAccountRepository) findById(id esag.AggregateId) (*userAccount, err
 }
 
 func Test_Repository_DynamoDB_StoreAndFindById(t *testing.T) {
-	// Given
 	ctx := context.Background()
 	container, err := localstack.RunContainer(
 		ctx,
@@ -133,7 +132,6 @@ func Test_Repository_DynamoDB_StoreAndFindById(t *testing.T) {
 		aggregateConverter)
 	require.Nil(t, err)
 
-	// When
 	repository := newUserAccountRepository(eventStore)
 	initial, userAccountCreated := newUserAccount(newUserAccountId("1"), "test")
 	err = repository.storeEventAndSnapshot(userAccountCreated, initial)
@@ -146,6 +144,29 @@ func Test_Repository_DynamoDB_StoreAndFindById(t *testing.T) {
 	result, err := actual.Rename("test2")
 	require.Nil(t, err)
 	result.Aggregate.Version = actual.Version
+
+	err = repository.storeEventAndSnapshot(result.Event, result.Aggregate)
+	require.Nil(t, err)
+	actual2, err := repository.findById(&initial.Id)
+	require.Nil(t, err)
+	assert.Equal(t, "test2", actual2.Name)
+
+}
+
+func Test_Repository_OnMemory_StoreAndFindById(t *testing.T) {
+	eventStore := esag.NewEventStoreOnMemory()
+	repository := newUserAccountRepository(eventStore)
+	initial, userAccountCreated := newUserAccount(newUserAccountId("1"), "test")
+
+	err := repository.storeEventAndSnapshot(userAccountCreated, initial)
+	require.Nil(t, err)
+	actual, err := repository.findById(&initial.Id)
+	require.Nil(t, err)
+
+	assert.Equal(t, initial, actual)
+
+	result, err := actual.Rename("test2")
+	require.Nil(t, err)
 
 	err = repository.storeEventAndSnapshot(result.Event, result.Aggregate)
 	require.Nil(t, err)
