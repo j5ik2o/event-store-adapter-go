@@ -8,7 +8,7 @@ This guide details the necessary changes for migrating from version `0.4.21` to 
 
 #### Event Store Refactoring
 
-- **Change of Event Store Constructor:**
+- Change of Event Store Constructor:
   The `NewEventStore` function has been renamed to `NewEventStoreOnDynamoDB`. When migrating, replace all instances of `NewEventStore` with `NewEventStoreOnDynamoDB`.
 
   **Before:**
@@ -21,7 +21,7 @@ This guide details the necessary changes for migrating from version `0.4.21` to 
   eventStore := NewEventStoreOnDynamoDB(dynamodbClient, "journal", "snapshot", ...)
   ```
 
-- **Interface Implementation:**
+- Interface Implementation:
   The `EventStore` has been changed to an interface, affecting how it is instantiated and interacted with in the code. Ensure your implementation aligns with the new interface structure.
 
 #### New Event Store for Memory
