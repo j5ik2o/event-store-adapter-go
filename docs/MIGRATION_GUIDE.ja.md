@@ -6,10 +6,10 @@
 
 ### 主な変更点
 
-#### イベントストアのリファクタリング
+#### 変更: イベントストアのリファクタリング
 
 - イベントストア・コンストラクタの変更
-  NewEventStore` 関数の名前が `NewEventStoreOnDynamoDB` に変更されました。移行する場合は、`NewEventStore` のインスタンスをすべて `NewEventStoreOnDynamoDB` に置き換えてください。
+  `NewEventStore` 関数の名前が `NewEventStoreOnDynamoDB` に変更されました。移行する場合は、`NewEventStore` のインスタンスをすべて `NewEventStoreOnDynamoDB` に置き換えてください。
 
   **移行前:**
   ```go
@@ -21,12 +21,12 @@
   eventStore := NewEventStoreOnDynamoDB(dynamodbClient, "journal", "snapshot", ...)
   ```
 
-- インターフェースの実装:**
-  EventStore` はインタフェースに変更され、インスタンス化され、コード内でどのように扱われるかに影響します。あなたの実装が新しいインターフェイス構造に合わせていることを確認してください。
+- インターフェースの実装
+  `EventStore` はインタフェースに変更され、インスタンス化され、コード内でどのように扱われるかに影響します。あなたの実装が新しいインターフェイス構造に合わせていることを確認してください。
 
-#### メモリーの新しいイベントストア
+#### 追加: オンメモリー用イベントストア
 
-- イベントストアの新しいメモリ内バージョン `EventStoreOnMemory` が導入されました。これはテストやDynamoDBベースのストアが必要ないシナリオに使用できる。
+- オンメモリ用のイベントストア `EventStoreOnMemory` が導入されました。これはテストやDynamoDBベースのストアが必要ないシナリオに使用できる。
 
   **使用例**
   ```go
