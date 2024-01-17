@@ -21,11 +21,11 @@ type UserAccountRepository struct {
     eventConverter     EventConverter
 }
 
-func (r *UserAccountRepository) Store(event Event, version uint64) error {
+func (r *UserAccountRepository) StoreEvent(event Event, version uint64) error {
     return r.eventStore.PersistEvent(event, version)
 }
 
-func (r *UserAccountRepository) Store(event Event, aggregate Aggregate) error {
+func (r *UserAccountRepository) StoreEventAndSnapshot(event Event, aggregate Aggregate) error {
     return r.eventStore.PersistEventAndSnapshot(event, aggregate)
 }
 
