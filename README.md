@@ -29,7 +29,7 @@ func (r *UserAccountRepository) Store(event Event, aggregate Aggregate) error {
     return r.eventStore.PersistEventAndSnapshot(event, aggregate)
 }
 
-func (r *userAccountRepository) findById(id esag.AggregateId) (*userAccount, error) {
+func (r *UserAccountRepository) findById(id esag.AggregateId) (*userAccount, error) {
 	result, err := r.eventStore.GetLatestSnapshotById(id, r.aggregateConverter)
 	if err != nil {
 		return nil, err
