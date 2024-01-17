@@ -58,7 +58,7 @@ repository := NewUserAccountRepository(eventStore)
 
 userAccount1, userAccountCreated := NewUserAccount(UserAccountId{Value: "1"}, "test")
 // Store an aggregate with a create event
-err = repository.Store(userAccountCreated, userAccount1.Version, userAccount1)
+err = repository.StoreEvent(userAccountCreated, userAccount1.Version, userAccount1)
 if err != nil {
     return err
 }
