@@ -13,12 +13,12 @@
 
   **移行前:**
   ```go
-  eventStore := NewEventStore(dynamodbClient, "journal", "snapshot", ...)
+  eventStore, err := NewEventStore(dynamodbClient, "journal", "snapshot", ...)
   ```
 
   **移行後:**
   ```go
-  eventStore := NewEventStoreOnDynamoDB(dynamodbClient, "journal", "snapshot", ...)
+  eventStore, err := NewEventStoreOnDynamoDB(dynamodbClient, "journal", "snapshot", ...)
   ```
 
 - インターフェースの実装
