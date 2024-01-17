@@ -16,7 +16,7 @@ EventStoreを使えば、Event Sourcing対応リポジトリを簡単に実装�
 
 ```go
 type UserAccountRepository struct {
-    eventStore         *EventStore
+    eventStore         EventStore
     aggregateConverter AggregateConverter
     eventConverter     EventConverter
 }
@@ -49,7 +49,10 @@ func (r *userAccountRepository) findById(id esag.AggregateId) (*userAccount, err
 以下はリポジトリの使用例です。
 
 ```go
-eventStore := NewEventStoreOnDynamoDB(dynamodbClient, "journal", "snapshot", "journal-aid-index", "snapshot-aid-index", 1)
+eventStore, err := NewEventStoreOnDynamoDB(dynamodbClient, "journal", "snapshot", "journal-aid-index", "snapshot-aid-index", 1)
+if err != nil {
+    return err
+}
 repository := NewUserAccountRepository(eventStore)
 
 userAccount1, userAccountCreated := NewUserAccount(UserAccountId{Value: "1"}, "test")
