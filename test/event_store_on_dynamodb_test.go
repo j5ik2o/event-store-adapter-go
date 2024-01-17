@@ -16,7 +16,7 @@ import (
 )
 
 // Creating a new EventStore instance with valid parameters should return a non-nil EventStore object.
-func Test_NewEventStoreWithValidParameters(t *testing.T) {
+func Test_EventStoreOnDynamoDB_NewWithValidParameters(t *testing.T) {
 	client := &dynamodb.Client{}
 	journalTableName := "journal"
 	snapshotTableName := "snapshot"
@@ -29,7 +29,7 @@ func Test_NewEventStoreWithValidParameters(t *testing.T) {
 	snapshotConverter := func(aggregateMap map[string]interface{}) (event_store_adapter_go.Aggregate, error) {
 		return nil, nil
 	}
-	es, err := event_store_adapter_go.NewEventStore(client, journalTableName, snapshotTableName, journalAidIndexName, snapshotAidIndexName, shardCount, eventConverter, snapshotConverter)
+	es, err := event_store_adapter_go.NewEventStoreOnDynamoDB(client, journalTableName, snapshotTableName, journalAidIndexName, snapshotAidIndexName, shardCount, eventConverter, snapshotConverter)
 	if err != nil {
 		t.Errorf("Expected no error, but got %v", err)
 	}
@@ -38,7 +38,7 @@ func Test_NewEventStoreWithValidParameters(t *testing.T) {
 	}
 }
 
-func Test_WriteAndRead(t *testing.T) {
+func Test_EventStoreOnDynamoDB_WriteAndRead(t *testing.T) {
 	// Given
 	ctx := context.Background()
 
@@ -118,7 +118,7 @@ func Test_WriteAndRead(t *testing.T) {
 		}
 	}
 
-	eventStore, err := event_store_adapter_go.NewEventStore(
+	eventStore, err := event_store_adapter_go.NewEventStoreOnDynamoDB(
 		dynamodbClient,
 		"journal",
 		"snapshot",
@@ -190,7 +190,7 @@ func Test_WriteAndRead(t *testing.T) {
 }
 
 // Persists an event and a snapshot for a user account
-func Test_PersistsEventAndSnapshot(t *testing.T) {
+func Test_EventStoreOnDynamoDB_PersistsEventAndSnapshot(t *testing.T) {
 	ctx := context.Background()
 
 	container, err := localstack.RunContainer(
@@ -268,7 +268,7 @@ func Test_PersistsEventAndSnapshot(t *testing.T) {
 		}
 	}
 
-	eventStore, err := event_store_adapter_go.NewEventStore(
+	eventStore, err := event_store_adapter_go.NewEventStoreOnDynamoDB(
 		dynamodbClient,
 		"journal",
 		"snapshot",
