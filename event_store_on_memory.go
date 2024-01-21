@@ -9,6 +9,8 @@ type EventStoreOnMemory struct {
 }
 
 // NewEventStoreOnMemory is the constructor of EventStoreOnMemory.
+//
+// The returned value is the pointer to EventStoreOnMemory.
 func NewEventStoreOnMemory() *EventStoreOnMemory {
 	return &EventStoreOnMemory{events: make(map[string][]Event), snapshots: make(map[string]Aggregate)}
 }
