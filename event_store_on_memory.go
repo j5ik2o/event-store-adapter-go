@@ -1,12 +1,14 @@
 package event_store_adapter_go
 
-var initialVersion = uint64(1)
+const initialVersion = uint64(1)
 
+// EventStoreOnMemory is the memory implementation of EventStore.
 type EventStoreOnMemory struct {
 	events    map[string][]Event
 	snapshots map[string]Aggregate
 }
 
+// NewEventStoreOnMemory is the constructor of EventStoreOnMemory.
 func NewEventStoreOnMemory() *EventStoreOnMemory {
 	return &EventStoreOnMemory{events: make(map[string][]Event), snapshots: make(map[string]Aggregate)}
 }
