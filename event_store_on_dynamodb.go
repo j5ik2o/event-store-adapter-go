@@ -39,7 +39,11 @@ type EventStoreOption func(*EventStoreOnDynamoDB) error
 // - If you do not want to keep snapshots, specify false.
 // - The default is false.
 //
-// Returns an EventStoreOption.
+// # Parameters
+// - keepSnapshot is whether or not to keep snapshots.
+//
+// # Returns
+// - an EventStoreOption.
 func WithKeepSnapshot(keepSnapshot bool) EventStoreOption {
 	return func(es *EventStoreOnDynamoDB) error {
 		es.keepSnapshot = keepSnapshot
@@ -47,13 +51,17 @@ func WithKeepSnapshot(keepSnapshot bool) EventStoreOption {
 	}
 }
 
-// WithDeleteTtl sets a delete ttl.
+// WithDeleteTtl sets the ttl for deletion snapshots.
 //
 // - If you want to delete snapshots, specify a time.Duration.
 // - If you do not want to delete snapshots, specify math.MaxInt64.
 // - The default is math.MaxInt64.
 //
-// Returns an EventStoreOption.
+// # Parameters
+// - deleteTtl is the time to live for deletion snapshots.
+//
+// # Returns
+// - an EventStoreOption.
 func WithDeleteTtl(deleteTtl time.Duration) EventStoreOption {
 	return func(es *EventStoreOnDynamoDB) error {
 		es.deleteTtl = deleteTtl
@@ -67,7 +75,11 @@ func WithDeleteTtl(deleteTtl time.Duration) EventStoreOption {
 // - If you do not want to keep snapshots, specify math.MaxInt64.
 // - The default is math.MaxInt64.
 //
-// Returns an EventStoreOption.
+// # Parameters
+// - keepSnapshotCount is a keep snapshot count.
+//
+// # Returns
+// - an EventStoreOption.
 func WithKeepSnapshotCount(keepSnapshotCount uint32) EventStoreOption {
 	return func(es *EventStoreOnDynamoDB) error {
 		es.keepSnapshotCount = keepSnapshotCount
@@ -80,7 +92,11 @@ func WithKeepSnapshotCount(keepSnapshotCount uint32) EventStoreOption {
 // - If you want to change the key resolver, specify a KeyResolver.
 // - The default is DefaultKeyResolver.
 //
-// Returns an EventStoreOption.
+// # Parameters
+// - keyResolver is a key resolver.
+//
+// # Returns
+// - an EventStoreOption.
 func WithKeyResolver(keyResolver KeyResolver) EventStoreOption {
 	return func(es *EventStoreOnDynamoDB) error {
 		es.keyResolver = keyResolver
@@ -93,7 +109,11 @@ func WithKeyResolver(keyResolver KeyResolver) EventStoreOption {
 // - If you want to change the event serializer, specify an EventSerializer.
 // - The default is DefaultEventSerializer.
 //
-// Returns an EventStoreOption.
+// # Parameters
+// - eventSerializer is an event serializer.
+//
+// # Returns
+// - an EventStoreOption.
 func WithEventSerializer(eventSerializer EventSerializer) EventStoreOption {
 	return func(es *EventStoreOnDynamoDB) error {
 		es.eventSerializer = eventSerializer
@@ -106,7 +126,11 @@ func WithEventSerializer(eventSerializer EventSerializer) EventStoreOption {
 // - If you want to change the snapshot serializer, specify a SnapshotSerializer.
 // - The default is DefaultSnapshotSerializer.
 //
-// Returns an EventStoreOption.
+// # Parameters
+// - snapshotSerializer is a snapshot serializer.
+//
+// # Returns
+// - an EventStoreOption.
 func WithSnapshotSerializer(snapshotSerializer SnapshotSerializer) EventStoreOption {
 	return func(es *EventStoreOnDynamoDB) error {
 		es.snapshotSerializer = snapshotSerializer
@@ -115,6 +139,21 @@ func WithSnapshotSerializer(snapshotSerializer SnapshotSerializer) EventStoreOpt
 }
 
 // NewEventStoreOnDynamoDB returns a new EventStore.
+//
+// # Parameters
+// - client is a DynamoDB client.
+// - journalTableName is a journal table name.
+// - snapshotTableName is a snapshot table name.
+// - journalAidIndexName is a journal aggregateId index name.
+// - snapshotAidIndexName is a snapshot aggregateId index name.
+// - shardCount is a shard count.
+// - eventConverter is a converter to convert a map to an event.
+// - snapshotConverter is a converter to convert a map to an aggregate.
+// - options is an EventStoreOption.
+//
+// # Returns
+// - an EventStore
+// - an error
 func NewEventStoreOnDynamoDB(
 	client *dynamodb.Client,
 	journalTableName string,
@@ -168,123 +207,6 @@ func NewEventStoreOnDynamoDB(
 	return es, nil
 }
 
-// putSnapshot returns a PutInput for snapshot.
-//
-// - event is an event to store.
-// - seqNr is a seqNr of the event.
-// - aggregate is an aggregate to store.
-//
-// Returns a PutInput and an error.
-func (es *EventStoreOnDynamoDB) putSnapshot(event Event, seqNr uint64, aggregate Aggregate) (*types.Put, error) {
-	if event == nil {
-		return nil, errors.New("event is nil")
-	}
-	if aggregate == nil {
-		return nil, errors.New("aggregate is nil")
-	}
-	pkey := es.keyResolver.ResolvePkey(event.GetAggregateId(), es.shardCount)
-	skey := es.keyResolver.ResolveSkey(event.GetAggregateId(), seqNr)
-	payload, err := es.snapshotSerializer.Serialize(aggregate)
-	if err != nil {
-		return nil, err
-	}
-	input := types.Put{
-		TableName: aws.String(es.snapshotTableName),
-		Item: map[string]types.AttributeValue{
-			"pkey":    &types.AttributeValueMemberS{Value: pkey},
-			"skey":    &types.AttributeValueMemberS{Value: skey},
-			"aid":     &types.AttributeValueMemberS{Value: event.GetAggregateId().AsString()},
-			"seq_nr":  &types.AttributeValueMemberN{Value: strconv.FormatUint(seqNr, 10)},
-			"payload": &types.AttributeValueMemberB{Value: payload},
-			"version": &types.AttributeValueMemberN{Value: "1"},
-			"ttl":     &types.AttributeValueMemberN{Value: "0"},
-		},
-		ConditionExpression: aws.String("attribute_not_exists(pkey) AND attribute_not_exists(skey)"),
-	}
-	return &input, nil
-}
-
-// updateSnapshot returns an UpdateInput for snapshot.
-//
-// - event is an event to store.
-// - seqNr is a seqNr of the event.
-// - version is a version of the aggregate.
-// - aggregate is an aggregate to store.
-//   - Required when event is created, otherwise you can choose whether or not to save a snapshot.
-//
-// Returns an UpdateInput and an error.
-func (es *EventStoreOnDynamoDB) updateSnapshot(event Event, seqNr uint64, version uint64, aggregate Aggregate) (*types.Update, error) {
-	if event == nil {
-		return nil, errors.New("event is nil")
-	}
-	pkey := es.keyResolver.ResolvePkey(event.GetAggregateId(), es.shardCount)
-	skey := es.keyResolver.ResolveSkey(event.GetAggregateId(), seqNr)
-	update := types.Update{
-		TableName:        aws.String(es.snapshotTableName),
-		UpdateExpression: aws.String("SET #version=:after_version"),
-		Key: map[string]types.AttributeValue{
-			"pkey": &types.AttributeValueMemberS{Value: pkey},
-			"skey": &types.AttributeValueMemberS{Value: skey},
-		},
-		ExpressionAttributeNames: map[string]string{
-			"#version": "version",
-		},
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":before_version": &types.AttributeValueMemberN{Value: strconv.FormatUint(version, 10)},
-			":after_version":  &types.AttributeValueMemberN{Value: strconv.FormatUint(version+1, 10)},
-		},
-		ConditionExpression: aws.String("#version=:before_version"),
-	}
-	if aggregate != nil {
-		payload, err := es.snapshotSerializer.Serialize(aggregate)
-		if err != nil {
-			return nil, err
-		}
-		update.UpdateExpression = aws.String("SET #payload=:payload, #seq_nr=:seq_nr, #version=:after_version")
-		update.ExpressionAttributeNames["#seq_nr"] = "seq_nr"
-		update.ExpressionAttributeNames["#payload"] = "payload"
-		update.ExpressionAttributeValues[":seq_nr"] = &types.AttributeValueMemberN{Value: strconv.FormatUint(seqNr, 10)}
-		update.ExpressionAttributeValues[":payload"] = &types.AttributeValueMemberB{Value: payload}
-	}
-	return &update, nil
-}
-
-// putJournal returns a PutInput for journal.
-//
-// - event is an event to store.
-//
-// Returns a PutInput and an error.
-func (es *EventStoreOnDynamoDB) putJournal(event Event) (*types.Put, error) {
-	if event == nil {
-		return nil, errors.New("event is nil")
-	}
-	pkey := es.keyResolver.ResolvePkey(event.GetAggregateId(), es.shardCount)
-	skey := es.keyResolver.ResolveSkey(event.GetAggregateId(), event.GetSeqNr())
-	payload, err := es.eventSerializer.Serialize(event)
-	if err != nil {
-		return nil, err
-	}
-	input := types.Put{
-		TableName: aws.String(es.journalTableName),
-		Item: map[string]types.AttributeValue{
-			"pkey":        &types.AttributeValueMemberS{Value: pkey},
-			"skey":        &types.AttributeValueMemberS{Value: skey},
-			"aid":         &types.AttributeValueMemberS{Value: event.GetAggregateId().AsString()},
-			"seq_nr":      &types.AttributeValueMemberN{Value: strconv.FormatUint(event.GetSeqNr(), 10)},
-			"payload":     &types.AttributeValueMemberB{Value: payload},
-			"occurred_at": &types.AttributeValueMemberN{Value: strconv.FormatUint(event.GetOccurredAt(), 10)},
-		},
-		ConditionExpression: aws.String("attribute_not_exists(pkey) AND attribute_not_exists(skey)"),
-	}
-	return &input, nil
-}
-
-// GetLatestSnapshotById returns a snapshot by aggregateId.
-//
-// - aggregateId is an aggregateId to get a snapshot.
-// - converter is a converter to convert a map to an aggregate.
-//
-// Returns a snapshot and an error.
 func (es *EventStoreOnDynamoDB) GetLatestSnapshotById(aggregateId AggregateId) (*AggregateResult, error) {
 	if aggregateId == nil {
 		return nil, errors.New("aggregateId is nil")
@@ -329,13 +251,6 @@ func (es *EventStoreOnDynamoDB) GetLatestSnapshotById(aggregateId AggregateId) (
 	}
 }
 
-// GetEventsByIdSinceSeqNr returns events by aggregateId and seqNr.
-//
-// - aggregateId is an aggregateId to get events.
-// - seqNr is a seqNr to get events.
-// - converter is a converter to convert a map to an event.
-//
-// Returns events and an error.
 func (es *EventStoreOnDynamoDB) GetEventsByIdSinceSeqNr(aggregateId AggregateId, seqNr uint64) ([]Event, error) {
 	if aggregateId == nil {
 		panic("aggregateId is nil")
@@ -403,6 +318,132 @@ func (es *EventStoreOnDynamoDB) PersistEventAndSnapshot(event Event, aggregate A
 	return nil
 }
 
+// putSnapshot returns a PutInput for snapshot.
+//
+// # Parameters
+// - event is an event to store.
+// - seqNr is a seqNr of the event.
+// - aggregate is an aggregate to store.
+//
+// # Returns
+// - a PutInput
+// - an error
+func (es *EventStoreOnDynamoDB) putSnapshot(event Event, seqNr uint64, aggregate Aggregate) (*types.Put, error) {
+	if event == nil {
+		return nil, errors.New("event is nil")
+	}
+	if aggregate == nil {
+		return nil, errors.New("aggregate is nil")
+	}
+	pkey := es.keyResolver.ResolvePkey(event.GetAggregateId(), es.shardCount)
+	skey := es.keyResolver.ResolveSkey(event.GetAggregateId(), seqNr)
+	payload, err := es.snapshotSerializer.Serialize(aggregate)
+	if err != nil {
+		return nil, err
+	}
+	input := types.Put{
+		TableName: aws.String(es.snapshotTableName),
+		Item: map[string]types.AttributeValue{
+			"pkey":    &types.AttributeValueMemberS{Value: pkey},
+			"skey":    &types.AttributeValueMemberS{Value: skey},
+			"aid":     &types.AttributeValueMemberS{Value: event.GetAggregateId().AsString()},
+			"seq_nr":  &types.AttributeValueMemberN{Value: strconv.FormatUint(seqNr, 10)},
+			"payload": &types.AttributeValueMemberB{Value: payload},
+			"version": &types.AttributeValueMemberN{Value: "1"},
+			"ttl":     &types.AttributeValueMemberN{Value: "0"},
+		},
+		ConditionExpression: aws.String("attribute_not_exists(pkey) AND attribute_not_exists(skey)"),
+	}
+	return &input, nil
+}
+
+// updateSnapshot returns an UpdateInput for snapshot.
+//
+// # Parameters
+// - event is an event to store.
+// - seqNr is a seqNr of the event.
+// - version is a version of the aggregate.
+// - aggregate is an aggregate to store.
+//   - Required when event is created, otherwise you can choose whether or not to save a snapshot.
+//
+// # Returns
+// - an UpdateInput
+// - an error
+func (es *EventStoreOnDynamoDB) updateSnapshot(event Event, seqNr uint64, version uint64, aggregate Aggregate) (*types.Update, error) {
+	if event == nil {
+		return nil, errors.New("event is nil")
+	}
+	pkey := es.keyResolver.ResolvePkey(event.GetAggregateId(), es.shardCount)
+	skey := es.keyResolver.ResolveSkey(event.GetAggregateId(), seqNr)
+	update := types.Update{
+		TableName:        aws.String(es.snapshotTableName),
+		UpdateExpression: aws.String("SET #version=:after_version"),
+		Key: map[string]types.AttributeValue{
+			"pkey": &types.AttributeValueMemberS{Value: pkey},
+			"skey": &types.AttributeValueMemberS{Value: skey},
+		},
+		ExpressionAttributeNames: map[string]string{
+			"#version": "version",
+		},
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":before_version": &types.AttributeValueMemberN{Value: strconv.FormatUint(version, 10)},
+			":after_version":  &types.AttributeValueMemberN{Value: strconv.FormatUint(version+1, 10)},
+		},
+		ConditionExpression: aws.String("#version=:before_version"),
+	}
+	if aggregate != nil {
+		payload, err := es.snapshotSerializer.Serialize(aggregate)
+		if err != nil {
+			return nil, err
+		}
+		update.UpdateExpression = aws.String("SET #payload=:payload, #seq_nr=:seq_nr, #version=:after_version")
+		update.ExpressionAttributeNames["#seq_nr"] = "seq_nr"
+		update.ExpressionAttributeNames["#payload"] = "payload"
+		update.ExpressionAttributeValues[":seq_nr"] = &types.AttributeValueMemberN{Value: strconv.FormatUint(seqNr, 10)}
+		update.ExpressionAttributeValues[":payload"] = &types.AttributeValueMemberB{Value: payload}
+	}
+	return &update, nil
+}
+
+// putJournal returns a PutInput for journal.
+//
+// # Parameters
+// - event is an event to store.
+//
+// # Returns
+// - a PutInput
+// - an error
+func (es *EventStoreOnDynamoDB) putJournal(event Event) (*types.Put, error) {
+	if event == nil {
+		return nil, errors.New("event is nil")
+	}
+	pkey := es.keyResolver.ResolvePkey(event.GetAggregateId(), es.shardCount)
+	skey := es.keyResolver.ResolveSkey(event.GetAggregateId(), event.GetSeqNr())
+	payload, err := es.eventSerializer.Serialize(event)
+	if err != nil {
+		return nil, err
+	}
+	input := types.Put{
+		TableName: aws.String(es.journalTableName),
+		Item: map[string]types.AttributeValue{
+			"pkey":        &types.AttributeValueMemberS{Value: pkey},
+			"skey":        &types.AttributeValueMemberS{Value: skey},
+			"aid":         &types.AttributeValueMemberS{Value: event.GetAggregateId().AsString()},
+			"seq_nr":      &types.AttributeValueMemberN{Value: strconv.FormatUint(event.GetSeqNr(), 10)},
+			"payload":     &types.AttributeValueMemberB{Value: payload},
+			"occurred_at": &types.AttributeValueMemberN{Value: strconv.FormatUint(event.GetOccurredAt(), 10)},
+		},
+		ConditionExpression: aws.String("attribute_not_exists(pkey) AND attribute_not_exists(skey)"),
+	}
+	return &input, nil
+}
+
+// tryPurgeExcessSnapshots tries to purge excess snapshots.
+//
+// # Parameters
+// - event is an event to store.
+// # Returns
+// - an error
 func (es *EventStoreOnDynamoDB) tryPurgeExcessSnapshots(event Event) error {
 	if es.keepSnapshot && es.keepSnapshotCount > 0 {
 		if es.deleteTtl < math.MaxInt64 {
@@ -418,6 +459,14 @@ func (es *EventStoreOnDynamoDB) tryPurgeExcessSnapshots(event Event) error {
 	return nil
 }
 
+// updateEventAndSnapshotOpt updates the event and the snapshot.
+//
+// # Parameters
+// - event is an event to store.
+// - version is a version of the aggregate.
+// - aggregate is an aggregate to store.
+// # Returns
+// - an error
 func (es *EventStoreOnDynamoDB) updateEventAndSnapshotOpt(event Event, version uint64, aggregate Aggregate) error {
 	if event == nil {
 		panic("event is nil")
@@ -462,6 +511,13 @@ func (es *EventStoreOnDynamoDB) updateEventAndSnapshotOpt(event Event, version u
 	return nil
 }
 
+// createEventAndSnapshot creates the event and the snapshot.
+//
+// # Parameters
+// - event is an event to store.
+// - aggregate is an aggregate to store.
+// # Returns
+// - an error
 func (es *EventStoreOnDynamoDB) createEventAndSnapshot(event Event, aggregate Aggregate) error {
 	if event == nil {
 		return errors.New("event is nil")
@@ -504,6 +560,12 @@ func (es *EventStoreOnDynamoDB) createEventAndSnapshot(event Event, aggregate Ag
 	return nil
 }
 
+// deleteExcessSnapshots deletes excess snapshots.
+//
+// # Parameters
+// - aggregateId is an aggregateId to delete.
+// # Returns
+// - an error
 func (es *EventStoreOnDynamoDB) deleteExcessSnapshots(aggregateId AggregateId) error {
 	if aggregateId == nil {
 		return errors.New("aggregateId is nil")
@@ -541,6 +603,12 @@ func (es *EventStoreOnDynamoDB) deleteExcessSnapshots(aggregateId AggregateId) e
 	return nil
 }
 
+// updateTtlOfExcessSnapshots updates the ttl of excess snapshots.
+//
+// # Parameters
+// - aggregateId is an aggregateId to update.
+// # Returns
+// - an error
 func (es *EventStoreOnDynamoDB) updateTtlOfExcessSnapshots(aggregateId AggregateId) error {
 	if aggregateId == nil {
 		return errors.New("aggregateId is nil")
@@ -582,6 +650,13 @@ func (es *EventStoreOnDynamoDB) updateTtlOfExcessSnapshots(aggregateId Aggregate
 	return nil
 }
 
+// getSnapshotCount returns a snapshot count.
+//
+// # Parameters
+// - aggregateId is an aggregateId to get.
+// # Returns
+// - a snapshot count
+// - an error
 func (es *EventStoreOnDynamoDB) getSnapshotCount(aggregateId AggregateId) (int32, error) {
 	if aggregateId == nil {
 		return 0, errors.New("aggregateId is nil")
@@ -610,6 +685,14 @@ type pkeyAndSkey struct {
 	skey string
 }
 
+// getLastSnapshotKeys returns the last snapshot keys.
+//
+// # Parameters
+// - aggregateId is an aggregateId to get.
+// - limit is a limit of the number of keys to get.
+// # Returns
+// - a list of keys
+// - an error
 func (es *EventStoreOnDynamoDB) getLastSnapshotKeys(aggregateId AggregateId, limit int32) ([]pkeyAndSkey, error) {
 	if aggregateId == nil {
 		return nil, errors.New("aggregateId is nil")
