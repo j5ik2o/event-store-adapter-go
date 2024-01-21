@@ -37,10 +37,7 @@ func (es *EventStoreOnMemory) PersistEvent(event Event, version uint64) error {
 	if es.snapshots[aggregateId].GetVersion() != version {
 		return NewOptimisticLockError("Transaction write was canceled due to conditional check failure", nil)
 	}
-	newVersion := initialVersion
-	if !event.IsCreated() {
-		newVersion = es.snapshots[aggregateId].GetVersion() + 1
-	}
+	newVersion := es.snapshots[aggregateId].GetVersion() + 1
 	es.events[aggregateId] = append(es.events[aggregateId], event)
 	snapshot := es.snapshots[aggregateId]
 	snapshot = snapshot.WithVersion(newVersion)
