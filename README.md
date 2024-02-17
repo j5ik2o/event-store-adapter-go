@@ -89,6 +89,10 @@ See [docs/DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md).
 
 See [docs/MIGRATION_GUIDE.md](docs/MIGRATION_GUIDE.md).
 
+## CQRS/Event Sourcing Example
+
+See [j5ik2o/cqrs-es-example-go](https://github.com/j5ik2o/cqrs-es-example-go).
+
 ## License.
 
 MIT License. See [LICENSE](LICENSE) for details.
