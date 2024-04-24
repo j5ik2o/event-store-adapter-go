@@ -1,4 +1,4 @@
-package event_store_adapter_go
+package pkg
 
 import (
 	"fmt"

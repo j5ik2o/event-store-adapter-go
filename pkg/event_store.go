@@ -1,4 +1,4 @@
-package event_store_adapter_go
+package pkg
 
 // EventStore is the interface for persisting events and snapshots.
 type EventStore interface {

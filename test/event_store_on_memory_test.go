@@ -1,7 +1,7 @@
 package test
 
 import (
-	event_store_adapter_go "github.com/j5ik2o/event-store-adapter-go"
+	event_store_adapter_go "github.com/j5ik2o/event-store-adapter-go/pkg"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"testing"

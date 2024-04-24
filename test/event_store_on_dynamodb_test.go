@@ -3,12 +3,12 @@ package test
 import (
 	"context"
 	"fmt"
+	"github.com/j5ik2o/event-store-adapter-go/pkg"
+	"github.com/j5ik2o/event-store-adapter-go/pkg/common"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	event_store_adapter_go "github.com/j5ik2o/event-store-adapter-go"
-	"github.com/j5ik2o/event-store-adapter-go/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -23,13 +23,13 @@ func Test_EventStoreOnDynamoDB_NewWithValidParameters(t *testing.T) {
 	journalAidIndexName := "journalAidIndex"
 	snapshotAidIndexName := "snapshotAidIndex"
 	shardCount := uint64(1)
-	eventConverter := func(eventMap map[string]interface{}) (event_store_adapter_go.Event, error) {
+	eventConverter := func(eventMap map[string]interface{}) (pkg.Event, error) {
 		return nil, nil
 	}
-	snapshotConverter := func(aggregateMap map[string]interface{}) (event_store_adapter_go.Aggregate, error) {
+	snapshotConverter := func(aggregateMap map[string]interface{}) (pkg.Aggregate, error) {
 		return nil, nil
 	}
-	es, err := event_store_adapter_go.NewEventStoreOnDynamoDB(client, journalTableName, snapshotTableName, journalAidIndexName, snapshotAidIndexName, shardCount, eventConverter, snapshotConverter)
+	es, err := pkg.NewEventStoreOnDynamoDB(client, journalTableName, snapshotTableName, journalAidIndexName, snapshotAidIndexName, shardCount, eventConverter, snapshotConverter)
 	if err != nil {
 		t.Errorf("Expected no error, but got %v", err)
 	}
@@ -71,7 +71,7 @@ func Test_EventStoreOnDynamoDB_WriteAndRead(t *testing.T) {
 	require.Nil(t, err)
 
 	// When
-	snapshotConverter := func(m map[string]interface{}) (event_store_adapter_go.Aggregate, error) {
+	snapshotConverter := func(m map[string]interface{}) (pkg.Aggregate, error) {
 		idMap, ok := m["Id"].(map[string]interface{})
 		if !ok {
 			return nil, fmt.Errorf("Id is not a map")
@@ -85,7 +85,7 @@ func Test_EventStoreOnDynamoDB_WriteAndRead(t *testing.T) {
 		return result, nil
 	}
 
-	eventConverter := func(m map[string]interface{}) (event_store_adapter_go.Event, error) {
+	eventConverter := func(m map[string]interface{}) (pkg.Event, error) {
 		aggregateMap, ok := m["AggregateId"].(map[string]interface{})
 		if !ok {
 			return nil, fmt.Errorf("AggregateId is not a map")
@@ -118,7 +118,7 @@ func Test_EventStoreOnDynamoDB_WriteAndRead(t *testing.T) {
 		}
 	}
 
-	eventStore, err := event_store_adapter_go.NewEventStoreOnDynamoDB(
+	eventStore, err := pkg.NewEventStoreOnDynamoDB(
 		dynamodbClient,
 		"journal",
 		"snapshot",
@@ -127,8 +127,8 @@ func Test_EventStoreOnDynamoDB_WriteAndRead(t *testing.T) {
 		1,
 		eventConverter,
 		snapshotConverter,
-		event_store_adapter_go.WithKeepSnapshot(true),
-		event_store_adapter_go.WithDeleteTtl(1*time.Second))
+		pkg.WithKeepSnapshot(true),
+		pkg.WithDeleteTtl(1*time.Second))
 	require.NotNil(t, eventStore)
 	require.Nil(t, err)
 
@@ -221,7 +221,7 @@ func Test_EventStoreOnDynamoDB_PersistsEventAndSnapshot(t *testing.T) {
 	err = common.CreateSnapshotTable(t, ctx, dynamodbClient, "snapshot", "snapshot-aid-index")
 	require.Nil(t, err)
 
-	snapshotConverter := func(m map[string]interface{}) (event_store_adapter_go.Aggregate, error) {
+	snapshotConverter := func(m map[string]interface{}) (pkg.Aggregate, error) {
 		idMap, ok := m["Id"].(map[string]interface{})
 		if !ok {
 			return nil, fmt.Errorf("Id is not a map")
@@ -235,7 +235,7 @@ func Test_EventStoreOnDynamoDB_PersistsEventAndSnapshot(t *testing.T) {
 		return result, nil
 	}
 
-	eventConverter := func(m map[string]interface{}) (event_store_adapter_go.Event, error) {
+	eventConverter := func(m map[string]interface{}) (pkg.Event, error) {
 		aggregateMap, ok := m["AggregateId"].(map[string]interface{})
 		if !ok {
 			return nil, fmt.Errorf("AggregateId is not a map")
@@ -268,7 +268,7 @@ func Test_EventStoreOnDynamoDB_PersistsEventAndSnapshot(t *testing.T) {
 		}
 	}
 
-	eventStore, err := event_store_adapter_go.NewEventStoreOnDynamoDB(
+	eventStore, err := pkg.NewEventStoreOnDynamoDB(
 		dynamodbClient,
 		"journal",
 		"snapshot",
@@ -277,8 +277,8 @@ func Test_EventStoreOnDynamoDB_PersistsEventAndSnapshot(t *testing.T) {
 		1,
 		eventConverter,
 		snapshotConverter,
-		event_store_adapter_go.WithKeepSnapshot(true),
-		event_store_adapter_go.WithDeleteTtl(1*time.Second))
+		pkg.WithKeepSnapshot(true),
+		pkg.WithDeleteTtl(1*time.Second))
 	require.NotNil(t, eventStore)
 	require.Nil(t, err)
 
