@@ -3,36 +3,35 @@ package test
 import (
 	"context"
 	"fmt"
+	"github.com/j5ik2o/event-store-adapter-go/pkg"
+	"github.com/j5ik2o/event-store-adapter-go/pkg/common"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/localstack"
-
-	esag "github.com/j5ik2o/event-store-adapter-go"
-	"github.com/j5ik2o/event-store-adapter-go/common"
 )
 
 type userAccountRepository struct {
-	eventStore esag.EventStore
+	eventStore pkg.EventStore
 }
 
-func newUserAccountRepository(eventStore esag.EventStore) *userAccountRepository {
+func newUserAccountRepository(eventStore pkg.EventStore) *userAccountRepository {
 	return &userAccountRepository{
 		eventStore: eventStore,
 	}
 }
 
-func (r *userAccountRepository) storeEvent(event esag.Event, version uint64) error {
+func (r *userAccountRepository) storeEvent(event pkg.Event, version uint64) error {
 	return r.eventStore.PersistEvent(event, version)
 }
 
-func (r *userAccountRepository) storeEventAndSnapshot(event esag.Event, aggregate esag.Aggregate) error {
+func (r *userAccountRepository) storeEventAndSnapshot(event pkg.Event, aggregate pkg.Aggregate) error {
 	return r.eventStore.PersistEventAndSnapshot(event, aggregate)
 }
 
-func (r *userAccountRepository) findById(id esag.AggregateId) (*userAccount, error) {
+func (r *userAccountRepository) findById(id pkg.AggregateId) (*userAccount, error) {
 	result, err := r.eventStore.GetLatestSnapshotById(id)
 	if err != nil {
 		return nil, err
@@ -75,7 +74,7 @@ func Test_Repository_DynamoDB_StoreAndFindById(t *testing.T) {
 	err = common.CreateSnapshotTable(t, ctx, dynamodbClient, "snapshot", "snapshot-aid-index")
 	require.Nil(t, err)
 
-	eventConverter := func(m map[string]interface{}) (esag.Event, error) {
+	eventConverter := func(m map[string]interface{}) (pkg.Event, error) {
 		aggregateMap, ok := m["AggregateId"].(map[string]interface{})
 		if !ok {
 			return nil, fmt.Errorf("AggregateId is not a map")
@@ -107,7 +106,7 @@ func Test_Repository_DynamoDB_StoreAndFindById(t *testing.T) {
 			return nil, fmt.Errorf("unknown event type")
 		}
 	}
-	aggregateConverter := func(m map[string]interface{}) (esag.Aggregate, error) {
+	aggregateConverter := func(m map[string]interface{}) (pkg.Aggregate, error) {
 		idMap, ok := m["Id"].(map[string]interface{})
 		if !ok {
 			return nil, fmt.Errorf("Id is not a map")
@@ -121,7 +120,7 @@ func Test_Repository_DynamoDB_StoreAndFindById(t *testing.T) {
 		return result, nil
 	}
 
-	eventStore, err := esag.NewEventStoreOnDynamoDB(
+	eventStore, err := pkg.NewEventStoreOnDynamoDB(
 		dynamodbClient,
 		"journal",
 		"snapshot",
@@ -154,7 +153,7 @@ func Test_Repository_DynamoDB_StoreAndFindById(t *testing.T) {
 }
 
 func Test_Repository_OnMemory_StoreAndFindById(t *testing.T) {
-	eventStore := esag.NewEventStoreOnMemory()
+	eventStore := pkg.NewEventStoreOnMemory()
 	repository := newUserAccountRepository(eventStore)
 	initial, userAccountCreated := newUserAccount(newUserAccountId("1"), "test")
 

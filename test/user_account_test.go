@@ -2,10 +2,10 @@ package test
 
 import (
 	"fmt"
+	esag "github.com/j5ik2o/event-store-adapter-go/pkg"
 	"math/rand"
 	"time"
 
-	esag "github.com/j5ik2o/event-store-adapter-go"
 	"github.com/oklog/ulid/v2"
 )
 

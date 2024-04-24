@@ -1,4 +1,4 @@
-package event_store_adapter_go
+package pkg
 
 const initialVersion = uint64(1)
 
