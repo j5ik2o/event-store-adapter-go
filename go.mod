@@ -11,7 +11,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.49.1
 	github.com/docker/go-connections v0.6.0
 	github.com/oklog/ulid/v2 v2.1.1
-	github.com/stretchr/testify v1.11.0
+	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.38.0
 	github.com/testcontainers/testcontainers-go/modules/localstack v0.38.0
 )
