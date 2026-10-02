@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./.takt/tools/**)",
+      "Read(./.takt/facets/**)",
+      "Read(./.takt/workflows/**)",
+      "Read(./.takt/steps/**)"
+    ]
+  }
+}
