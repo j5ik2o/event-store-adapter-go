@@ -1,0 +1,50 @@
+# このプロジェクトの TAKT の割り当てとプロファイル。
+#
+# このプロジェクトの割り当てとモデルは、すべてこのファイルに置く。~/.takt/runtime.yaml (全体) には
+# 何も書かない (コメントだけ)。全体の設定はすべてのプロジェクトに重ねて読まれ、ほかのプロジェクトで
+# トラブルになるため (2026-09-26・2026-09-30 の計測者の判断)。空の全体の設定は「設定なし」として
+# 扱われる (TAKT 0.66.0 の dist/infra/config/runtime-provider/loader.js)。
+#
+# worktree でも同じ設定で動くように、Git で管理する (.takt/.gitignore の `!runtime.yaml`)。
+# 一時的な切り替え (提供元の障害の回避など) は、その worktree の中だけで書き換え、コミットしない。
+version: 1
+companion:
+  enabled: true
+provider:
+  defaults: { profile: t2 }
+  profiles:
+    # T0: Flash 級。2026-09-24 から DeepSeek V4.1 Flash を試していたが、2026-09-26 に takt の中で
+    # `Bad Request: {"model":"deepseek-v4.1-flash"}` がステップごとに続いた (単体の opencode run は通る。
+    # 原因は未確認)。計測者の判断で、当面は Sonnet にする。原因が分かったら下のコメントの行に戻す
+    # t0-test-code:       { provider: opencode, model: opencode-go/deepseek-v4.1-flash }  # write_tests
+    # t0-production-code: { provider: opencode, model: opencode-go/deepseek-v4.1-flash }  # implement
+    # 2026-09-30: Sonnet 5.5 が使えるようになったので、Sonnet 5 から上げる (計測者の指示)
+    t0-test-code:       { provider: claude, model: claude-sonnet-5-5 }  # write_tests
+    t0-production-code: { provider: claude, model: claude-sonnet-5-5 }  # implement
+    # T1: 構造化出力に対応した provider が要る (selector / companion で使う)
+    t1: { provider: claude, model: claude-sonnet-5-5 }
+    # T2: defaults。T3 と T0/T1 の指定に当たらない step
+    t2: { provider: claude, model: claude-opus-5-5 }
+    # T3: 計画は Fable、検収は別ベンダーの Astra。Codex の利用上限 (9/27 まで) の間は Opus
+    t3-plan:  { provider: claude, model: claude-fable-5-1 }
+    t3-judge: { provider: claude, model: claude-opus-5-5 }
+    # t3-judge: { provider: codex, model: gpt-6-astra }
+  targets:
+    steps:
+      # T3 (optional): remove these four lines to run plan/replan and adjudication/final-gate on t2.
+      development-core/plan:                     { profile: t3-plan }
+      development-core/replan:                   { profile: t3-plan }
+      peer-review/review-adjudication:           { profile: t3-judge }
+      peer-review/final-gate:                    { profile: t3-judge }
+      # Tiers
+      development-core/write_tests:              { ladder: [t0-test-code, t1, t2] }
+      flash-implement-dynamic/implement:         { profile: t0-production-code }
+      flash-implement-dynamic/reimplement:       { profile: t1 }
+      flash-implement-dynamic/reimplement_final: { profile: t2 }
+      flash-remediation-dynamic/fix:             { ladder: [t1, t2] }
+    internal_agents:
+      selector: { profile: t1 }
+    companions:
+      ai-antipattern-review-companion: { profile: t1 }
+      testing-review-companion:        { profile: t1 }
+      review-companion-moderator:      { profile: t1 }
