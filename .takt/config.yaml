@@ -1,0 +1,3 @@
+language: ja
+auto_pr: false
+concurrency: 1
