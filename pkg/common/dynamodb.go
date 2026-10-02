@@ -10,7 +10,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	"github.com/docker/go-connections/nat"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/localstack"
 )
@@ -154,7 +153,7 @@ func CreateSnapshotTable(t *testing.T, ctx context.Context, client *dynamodb.Cli
 }
 
 func CreateDynamoDBClient(t *testing.T, ctx context.Context, l *localstack.LocalStackContainer) (*dynamodb.Client, error) {
-	mappedPort, err := l.MappedPort(ctx, nat.Port("4566/tcp"))
+	mappedPort, err := l.MappedPort(ctx, "4566/tcp")
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +173,7 @@ func CreateDynamoDBClient(t *testing.T, ctx context.Context, l *localstack.Local
 		func(service, region string, opts ...interface{}) (aws.Endpoint, error) {
 			return aws.Endpoint{
 				PartitionID:   "aws",
-				URL:           fmt.Sprintf("http://%s:%d", host, mappedPort.Int()),
+				URL:           fmt.Sprintf("http://%s:%d", host, mappedPort.Num()),
 				SigningRegion: region,
 			}, nil
 		})
