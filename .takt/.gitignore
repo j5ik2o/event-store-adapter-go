@@ -9,10 +9,10 @@
 !runtime.yaml
 !.takt-workflows
 
-# Facets, workflows and tools (version-controlled)
-!tools/
-!tools/**
-tools/**/target/
+# flash-default で使わない DDD ツールは追跡しない
+tools/
+
+# Facets and workflows (version-controlled)
 !workflows/
 !workflows/**
 !steps/
