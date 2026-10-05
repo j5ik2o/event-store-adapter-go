@@ -24,19 +24,37 @@ jobs:
         with:
           go-version: '1.27'
       - run: make test
+  release-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Test semver detection
+        run: python3 -m unittest discover -s .github -p 'test_semver_level.py' -v
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27'
+      - name: Check workflows
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          actionlint
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
     timeout-minutes: 1
-    needs: [lint, test]
+    needs: [lint, test, release-checks]
     if: always()
     steps:
       - name: Check CI results
         env:
           LINT_RESULT: ${{ needs.lint.result }}
           TEST_RESULT: ${{ needs.test.result }}
+          RELEASE_CHECKS_RESULT: ${{ needs.release-checks.result }}
         run: |
-          if [[ "$LINT_RESULT" != "success" || "$TEST_RESULT" != "success" ]]; then
-            echo "CI did not succeed: lint=$LINT_RESULT, test=$TEST_RESULT"
+          if [[ "$LINT_RESULT" != "success" || "$TEST_RESULT" != "success" || "$RELEASE_CHECKS_RESULT" != "success" ]]; then
+            echo "CI did not succeed: lint=$LINT_RESULT, test=$TEST_RESULT, release-checks=$RELEASE_CHECKS_RESULT"
             exit 1
           fi
