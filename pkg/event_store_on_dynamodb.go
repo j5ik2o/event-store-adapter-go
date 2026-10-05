@@ -268,12 +268,13 @@ func (es *EventStoreOnDynamoDB) GetEventsByIdSinceSeqNr(aggregateId AggregateId,
 			":seq_nr": &types.AttributeValueMemberN{Value: strconv.FormatUint(seqNr, 10)},
 		},
 	}
-	result, err := es.client.Query(context.Background(), request)
-	if err != nil {
-		return nil, NewIOError("Failed to GetEventsByIdSinceSeqNr query", err)
-	}
 	var events []Event
-	if len(result.Items) > 0 {
+	paginator := dynamodb.NewQueryPaginator(es.client, request)
+	for paginator.HasMorePages() {
+		result, err := paginator.NextPage(context.Background())
+		if err != nil {
+			return nil, NewIOError("Failed to GetEventsByIdSinceSeqNr query", err)
+		}
 		for _, item := range result.Items {
 			var eventMap map[string]interface{}
 			if err := es.eventSerializer.Deserialize(item["payload"].(*types.AttributeValueMemberB).Value, &eventMap); err != nil {
@@ -575,8 +576,11 @@ func (es *EventStoreOnDynamoDB) deleteExcessSnapshots(aggregateId AggregateId) e
 		if err != nil {
 			return err
 		}
-		snapshotCount -= 1
-		excessCount := uint32(snapshotCount) - es.keepSnapshotCount
+		// The count includes the current snapshot (seq_nr = 0).
+		if int64(snapshotCount) <= int64(es.keepSnapshotCount)+1 {
+			return nil
+		}
+		excessCount := uint32(snapshotCount-1) - es.keepSnapshotCount
 		if excessCount > 0 {
 			keys, err := es.getLastSnapshotKeys(aggregateId, int32(excessCount))
 			if err != nil {
@@ -618,8 +622,11 @@ func (es *EventStoreOnDynamoDB) updateTtlOfExcessSnapshots(aggregateId Aggregate
 		if err != nil {
 			return err
 		}
-		snapshotCount -= 1
-		excessCount := uint32(snapshotCount) - es.keepSnapshotCount
+		// The count includes the current snapshot (seq_nr = 0).
+		if int64(snapshotCount) <= int64(es.keepSnapshotCount)+1 {
+			return nil
+		}
+		excessCount := uint32(snapshotCount-1) - es.keepSnapshotCount
 		if excessCount > 0 {
 			keys, err := es.getLastSnapshotKeys(aggregateId, int32(excessCount))
 			if err != nil {
@@ -650,7 +657,8 @@ func (es *EventStoreOnDynamoDB) updateTtlOfExcessSnapshots(aggregateId Aggregate
 	return nil
 }
 
-// getSnapshotCount returns a snapshot count.
+// getSnapshotCount counts the current snapshot and retained historical snapshots.
+// In TTL mode, snapshots already marked for deletion are excluded.
 //
 // # Parameters
 // - aggregateId is an aggregateId to get.
@@ -673,11 +681,21 @@ func (es *EventStoreOnDynamoDB) getSnapshotCount(aggregateId AggregateId) (int32
 		},
 		Select: types.SelectCount,
 	}
-	response, err := es.client.Query(context.Background(), request)
-	if err != nil {
-		return 0, NewIOError("Failed to getSnapshotCount query", err)
+	if es.deleteTtl < math.MaxInt64 {
+		request.FilterExpression = aws.String("#ttl = :ttl")
+		request.ExpressionAttributeNames["#ttl"] = "ttl"
+		request.ExpressionAttributeValues[":ttl"] = &types.AttributeValueMemberN{Value: "0"}
 	}
-	return response.Count, nil
+	var count int32
+	paginator := dynamodb.NewQueryPaginator(es.client, request)
+	for paginator.HasMorePages() {
+		response, err := paginator.NextPage(context.Background())
+		if err != nil {
+			return 0, NewIOError("Failed to getSnapshotCount query", err)
+		}
+		count += response.Count
+	}
+	return count, nil
 }
 
 type pkeyAndSkey struct {
@@ -709,7 +727,7 @@ func (es *EventStoreOnDynamoDB) getLastSnapshotKeys(aggregateId AggregateId, lim
 			":aid":    &types.AttributeValueMemberS{Value: aggregateId.AsString()},
 			":seq_nr": &types.AttributeValueMemberN{Value: "0"},
 		},
-		ScanIndexForward: aws.Bool(false),
+		ScanIndexForward: aws.Bool(true),
 		Limit:            aws.Int32(limit),
 	}
 	if es.deleteTtl < math.MaxInt64 {
@@ -717,19 +735,24 @@ func (es *EventStoreOnDynamoDB) getLastSnapshotKeys(aggregateId AggregateId, lim
 		request.ExpressionAttributeNames["#ttl"] = "ttl"
 		request.ExpressionAttributeValues[":ttl"] = &types.AttributeValueMemberN{Value: "0"}
 	}
-	response, err := es.client.Query(context.Background(), request)
-	if err != nil {
-		return nil, NewIOError("Failed to getLastSnapshotKeys query", err)
-	}
 	var pkeySkeys []pkeyAndSkey
-	for _, item := range response.Items {
-		pkey := item["pkey"].(*types.AttributeValueMemberS).Value
-		skey := item["skey"].(*types.AttributeValueMemberS).Value
-		pkeySkey := pkeyAndSkey{
-			pkey: pkey,
-			skey: skey,
+	for {
+		response, err := es.client.Query(context.Background(), request)
+		if err != nil {
+			return nil, NewIOError("Failed to getLastSnapshotKeys query", err)
 		}
-		pkeySkeys = append(pkeySkeys, pkeySkey)
+		for _, item := range response.Items {
+			pkeySkeys = append(pkeySkeys, pkeyAndSkey{
+				pkey: item["pkey"].(*types.AttributeValueMemberS).Value,
+				skey: item["skey"].(*types.AttributeValueMemberS).Value,
+			})
+		}
+		// TTL filtering happens after Limit; marked items may consume an entire page.
+		if es.deleteTtl == math.MaxInt64 || len(pkeySkeys) >= int(limit) || len(response.LastEvaluatedKey) == 0 {
+			break
+		}
+		request.ExclusiveStartKey = response.LastEvaluatedKey
+		request.Limit = aws.Int32(limit - int32(len(pkeySkeys)))
 	}
 	return pkeySkeys, nil
 }
