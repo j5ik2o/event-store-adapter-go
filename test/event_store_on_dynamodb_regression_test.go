@@ -95,19 +95,22 @@ func Test_EventStoreOnDynamoDB_GetEventsReadsAllPages(t *testing.T) {
 // Historical snapshots have no read API, so inspect their persisted retention state.
 func activeSnapshotSeqNrs(t *testing.T, client *dynamodb.Client, id *userAccountId) []uint64 {
 	t.Helper()
-	result, err := client.Scan(context.Background(), &dynamodb.ScanInput{
+	paginator := dynamodb.NewScanPaginator(client, &dynamodb.ScanInput{
 		TableName: aws.String("snapshot"), ConsistentRead: aws.Bool(true),
 		FilterExpression:          aws.String("#aid = :aid"),
 		ExpressionAttributeNames:  map[string]string{"#aid": "aid"},
 		ExpressionAttributeValues: map[string]types.AttributeValue{":aid": &types.AttributeValueMemberS{Value: id.AsString()}},
 	})
-	require.NoError(t, err)
 	var seqNrs []uint64
-	for _, item := range result.Items {
-		if item["ttl"].(*types.AttributeValueMemberN).Value == "0" {
-			seqNr, err := strconv.ParseUint(item["seq_nr"].(*types.AttributeValueMemberN).Value, 10, 64)
-			require.NoError(t, err)
-			seqNrs = append(seqNrs, seqNr)
+	for paginator.HasMorePages() {
+		result, err := paginator.NextPage(context.Background())
+		require.NoError(t, err)
+		for _, item := range result.Items {
+			if item["ttl"].(*types.AttributeValueMemberN).Value == "0" {
+				seqNr, err := strconv.ParseUint(item["seq_nr"].(*types.AttributeValueMemberN).Value, 10, 64)
+				require.NoError(t, err)
+				seqNrs = append(seqNrs, seqNr)
+			}
 		}
 	}
 	sort.Slice(seqNrs, func(i, j int) bool { return seqNrs[i] < seqNrs[j] })
@@ -173,5 +176,97 @@ func Test_EventStoreOnDynamoDB_WritesSucceedBelowRetentionCount(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func Test_EventStoreOnDynamoDB_TtlRetentionIgnoresMarkedSnapshots(t *testing.T) {
+	store, client := newDynamoDBRegressionStore(t,
+		pkg.WithKeepSnapshot(true), pkg.WithKeepSnapshotCount(3), pkg.WithDeleteTtl(time.Hour))
+	id := newUserAccountId("marked-snapshot-retention")
+	aggregate, created := newUserAccount(id, "first")
+	require.NoError(t, store.PersistEventAndSnapshot(created, aggregate))
+	for seqNr := 2; seqNr <= 3; seqNr++ {
+		updated, err := aggregate.Rename(fmt.Sprintf("name-%d", seqNr))
+		require.NoError(t, err)
+		require.NoError(t, store.PersistEventAndSnapshot(updated.Event, updated.Aggregate))
+		aggregate = updated.Aggregate.WithVersion(aggregate.GetVersion() + 1).(*userAccount)
+	}
+	result, err := client.Scan(context.Background(), &dynamodb.ScanInput{TableName: aws.String("snapshot"), ConsistentRead: aws.Bool(true)})
+	require.NoError(t, err)
+	keys := make(map[string]map[string]types.AttributeValue)
+	for _, item := range result.Items {
+		keys[item["seq_nr"].(*types.AttributeValueMemberN).Value] = map[string]types.AttributeValue{"pkey": item["pkey"], "skey": item["skey"]}
+	}
+	markedTtl := strconv.FormatInt(time.Now().Add(24*time.Hour).Unix(), 10)
+	// Reproduce the older retention implementation's state: only snapshot 3 is marked.
+	_, err = client.UpdateItem(context.Background(), &dynamodb.UpdateItemInput{
+		TableName: aws.String("snapshot"), Key: keys["3"],
+		UpdateExpression:          aws.String("SET #ttl = :ttl"),
+		ExpressionAttributeNames:  map[string]string{"#ttl": "ttl"},
+		ExpressionAttributeValues: map[string]types.AttributeValue{":ttl": &types.AttributeValueMemberN{Value: markedTtl}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []uint64{0, 1, 2}, activeSnapshotSeqNrs(t, client, &id))
+	require.NoError(t, pkg.WithKeepSnapshotCount(2)(store))
+	updated, err := aggregate.Rename("fourth")
+	require.NoError(t, err)
+	require.NoError(t, store.PersistEventAndSnapshot(updated.Event, updated.Aggregate))
+	require.Equal(t, []uint64{0, 2, 4}, activeSnapshotSeqNrs(t, client, &id))
+	for seqNr, key := range keys {
+		item, err := client.GetItem(context.Background(), &dynamodb.GetItemInput{TableName: aws.String("snapshot"), Key: key, ConsistentRead: aws.Bool(true)})
+		require.NoError(t, err)
+		ttl := item.Item["ttl"].(*types.AttributeValueMemberN).Value
+		if seqNr == "1" {
+			require.NotEqual(t, "0", ttl)
+		} else if seqNr == "3" {
+			require.Equal(t, markedTtl, ttl)
+		} else {
+			require.Equal(t, "0", ttl)
+		}
+	}
+}
+
+func Test_EventStoreOnDynamoDB_TtlRetentionReadsPastMarkedPages(t *testing.T) {
+	store, client := newDynamoDBRegressionStore(t,
+		pkg.WithKeepSnapshot(true), pkg.WithKeepSnapshotCount(1), pkg.WithDeleteTtl(time.Hour))
+	id := newUserAccountId("marked-pages")
+	aggregate, created := newUserAccount(id, "first")
+	require.NoError(t, store.PersistEventAndSnapshot(created, aggregate))
+	// Each subsequent cleanup must pass the already marked oldest snapshots,
+	// including pages with no matching items, to find the next active snapshot.
+	for seqNr := 2; seqNr <= 5; seqNr++ {
+		updated, err := aggregate.Rename(fmt.Sprintf("name-%d", seqNr))
+		require.NoError(t, err)
+		require.NoError(t, store.PersistEventAndSnapshot(updated.Event, updated.Aggregate))
+		aggregate = updated.Aggregate.WithVersion(aggregate.GetVersion() + 1).(*userAccount)
+		require.Equal(t, []uint64{0, uint64(seqNr)}, activeSnapshotSeqNrs(t, client, &id))
+	}
+}
+
+func Test_EventStoreOnDynamoDB_RetentionCountsAllSnapshotPages(t *testing.T) {
+	for _, mode := range []string{"delete", "ttl"} {
+		t.Run(mode, func(t *testing.T) {
+			options := []pkg.EventStoreOption{pkg.WithKeepSnapshot(true), pkg.WithKeepSnapshotCount(20)}
+			if mode == "ttl" {
+				options = append(options, pkg.WithDeleteTtl(time.Hour))
+			}
+			store, client := newDynamoDBRegressionStore(t, options...)
+			id := newUserAccountId("large-snapshots")
+			name := strings.Repeat("x", 100*1024)
+			aggregate, created := newUserAccount(id, name)
+			require.NoError(t, store.PersistEventAndSnapshot(created, aggregate))
+			for seqNr := 2; seqNr <= 16; seqNr++ {
+				updated, err := aggregate.Rename(name)
+				require.NoError(t, err)
+				require.NoError(t, store.PersistEventAndSnapshot(updated.Event, updated.Aggregate))
+				aggregate = updated.Aggregate.WithVersion(aggregate.GetVersion() + 1).(*userAccount)
+			}
+			// The count query must read beyond DynamoDB's 1MB page boundary.
+			require.NoError(t, pkg.WithKeepSnapshotCount(12)(store))
+			updated, err := aggregate.Rename(name)
+			require.NoError(t, err)
+			require.NoError(t, store.PersistEventAndSnapshot(updated.Event, updated.Aggregate))
+			require.Equal(t, []uint64{0, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17}, activeSnapshotSeqNrs(t, client, &id))
+		})
 	}
 }
