@@ -268,12 +268,13 @@ func (es *EventStoreOnDynamoDB) GetEventsByIdSinceSeqNr(aggregateId AggregateId,
 			":seq_nr": &types.AttributeValueMemberN{Value: strconv.FormatUint(seqNr, 10)},
 		},
 	}
-	result, err := es.client.Query(context.Background(), request)
-	if err != nil {
-		return nil, NewIOError("Failed to GetEventsByIdSinceSeqNr query", err)
-	}
 	var events []Event
-	if len(result.Items) > 0 {
+	paginator := dynamodb.NewQueryPaginator(es.client, request)
+	for paginator.HasMorePages() {
+		result, err := paginator.NextPage(context.Background())
+		if err != nil {
+			return nil, NewIOError("Failed to GetEventsByIdSinceSeqNr query", err)
+		}
 		for _, item := range result.Items {
 			var eventMap map[string]interface{}
 			if err := es.eventSerializer.Deserialize(item["payload"].(*types.AttributeValueMemberB).Value, &eventMap); err != nil {
