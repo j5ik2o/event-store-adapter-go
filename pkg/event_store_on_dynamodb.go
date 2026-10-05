@@ -576,8 +576,11 @@ func (es *EventStoreOnDynamoDB) deleteExcessSnapshots(aggregateId AggregateId) e
 		if err != nil {
 			return err
 		}
-		snapshotCount -= 1
-		excessCount := uint32(snapshotCount) - es.keepSnapshotCount
+		// The count includes the current snapshot (seq_nr = 0).
+		if int64(snapshotCount) <= int64(es.keepSnapshotCount)+1 {
+			return nil
+		}
+		excessCount := uint32(snapshotCount-1) - es.keepSnapshotCount
 		if excessCount > 0 {
 			keys, err := es.getLastSnapshotKeys(aggregateId, int32(excessCount))
 			if err != nil {
@@ -619,8 +622,11 @@ func (es *EventStoreOnDynamoDB) updateTtlOfExcessSnapshots(aggregateId Aggregate
 		if err != nil {
 			return err
 		}
-		snapshotCount -= 1
-		excessCount := uint32(snapshotCount) - es.keepSnapshotCount
+		// The count includes the current snapshot (seq_nr = 0).
+		if int64(snapshotCount) <= int64(es.keepSnapshotCount)+1 {
+			return nil
+		}
+		excessCount := uint32(snapshotCount-1) - es.keepSnapshotCount
 		if excessCount > 0 {
 			keys, err := es.getLastSnapshotKeys(aggregateId, int32(excessCount))
 			if err != nil {

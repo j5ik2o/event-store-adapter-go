@@ -135,3 +135,43 @@ func Test_EventStoreOnDynamoDB_RetentionKeepsNewestSnapshot(t *testing.T) {
 		})
 	}
 }
+
+func Test_EventStoreOnDynamoDB_WritesSucceedBelowRetentionCount(t *testing.T) {
+	for _, mode := range []string{"delete", "ttl"} {
+		for _, persistSnapshot := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/snapshot=%t", mode, persistSnapshot), func(t *testing.T) {
+				options := []pkg.EventStoreOption{pkg.WithKeepSnapshot(true), pkg.WithKeepSnapshotCount(3)}
+				if mode == "ttl" {
+					options = append(options, pkg.WithDeleteTtl(time.Hour))
+				}
+				store, client := newDynamoDBRegressionStore(t, options...)
+				id := newUserAccountId("below-retention-count")
+				aggregate, created := newUserAccount(id, "first")
+				require.NoError(t, store.PersistEventAndSnapshot(created, aggregate))
+				for seqNr := uint64(2); seqNr <= 4; seqNr++ {
+					updated, err := aggregate.Rename(fmt.Sprintf("name-%d", seqNr))
+					require.NoError(t, err)
+					if persistSnapshot {
+						err = store.PersistEventAndSnapshot(updated.Event, updated.Aggregate)
+					} else {
+						err = store.PersistEvent(updated.Event, aggregate.GetVersion())
+					}
+					// The transaction must not be reported as failed by retention cleanup.
+					require.NoError(t, err)
+					aggregate = updated.Aggregate.WithVersion(aggregate.GetVersion() + 1).(*userAccount)
+				}
+				events, err := store.GetEventsByIdSinceSeqNr(&id, 1)
+				require.NoError(t, err)
+				require.Len(t, events, 4)
+				latest, err := store.GetLatestSnapshotById(&id)
+				require.NoError(t, err)
+				require.Equal(t, uint64(4), latest.Aggregate().GetVersion())
+				if persistSnapshot {
+					require.Equal(t, []uint64{0, 2, 3, 4}, activeSnapshotSeqNrs(t, client, &id))
+				} else {
+					require.Equal(t, []uint64{0, 1}, activeSnapshotSeqNrs(t, client, &id))
+				}
+			})
+		}
+	}
+}
