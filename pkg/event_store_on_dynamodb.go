@@ -710,7 +710,7 @@ func (es *EventStoreOnDynamoDB) getLastSnapshotKeys(aggregateId AggregateId, lim
 			":aid":    &types.AttributeValueMemberS{Value: aggregateId.AsString()},
 			":seq_nr": &types.AttributeValueMemberN{Value: "0"},
 		},
-		ScanIndexForward: aws.Bool(false),
+		ScanIndexForward: aws.Bool(true),
 		Limit:            aws.Int32(limit),
 	}
 	if es.deleteTtl < math.MaxInt64 {

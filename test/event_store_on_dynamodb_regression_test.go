@@ -3,10 +3,15 @@ package test
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/j5ik2o/event-store-adapter-go/pkg"
 	"github.com/j5ik2o/event-store-adapter-go/pkg/common"
 	"github.com/stretchr/testify/require"
@@ -84,5 +89,49 @@ func Test_EventStoreOnDynamoDB_GetEventsReadsAllPages(t *testing.T) {
 		} else {
 			require.Equal(t, name, event.(*userAccountNameChanged).Name)
 		}
+	}
+}
+
+// Historical snapshots have no read API, so inspect their persisted retention state.
+func activeSnapshotSeqNrs(t *testing.T, client *dynamodb.Client, id *userAccountId) []uint64 {
+	t.Helper()
+	result, err := client.Scan(context.Background(), &dynamodb.ScanInput{
+		TableName: aws.String("snapshot"), ConsistentRead: aws.Bool(true),
+		FilterExpression:          aws.String("#aid = :aid"),
+		ExpressionAttributeNames:  map[string]string{"#aid": "aid"},
+		ExpressionAttributeValues: map[string]types.AttributeValue{":aid": &types.AttributeValueMemberS{Value: id.AsString()}},
+	})
+	require.NoError(t, err)
+	var seqNrs []uint64
+	for _, item := range result.Items {
+		if item["ttl"].(*types.AttributeValueMemberN).Value == "0" {
+			seqNr, err := strconv.ParseUint(item["seq_nr"].(*types.AttributeValueMemberN).Value, 10, 64)
+			require.NoError(t, err)
+			seqNrs = append(seqNrs, seqNr)
+		}
+	}
+	sort.Slice(seqNrs, func(i, j int) bool { return seqNrs[i] < seqNrs[j] })
+	return seqNrs
+}
+
+func Test_EventStoreOnDynamoDB_RetentionKeepsNewestSnapshot(t *testing.T) {
+	for _, mode := range []string{"delete", "ttl"} {
+		t.Run(mode, func(t *testing.T) {
+			options := []pkg.EventStoreOption{pkg.WithKeepSnapshot(true), pkg.WithKeepSnapshotCount(1)}
+			if mode == "ttl" {
+				options = append(options, pkg.WithDeleteTtl(time.Hour))
+			}
+			store, client := newDynamoDBRegressionStore(t, options...)
+			id := newUserAccountId("retention-order")
+			aggregate, created := newUserAccount(id, "first")
+			require.NoError(t, store.PersistEventAndSnapshot(created, aggregate))
+			updated, err := aggregate.Rename("second")
+			require.NoError(t, err)
+			require.NoError(t, store.PersistEventAndSnapshot(updated.Event, updated.Aggregate))
+			require.Equal(t, []uint64{0, 2}, activeSnapshotSeqNrs(t, client, &id))
+			latest, err := store.GetLatestSnapshotById(&id)
+			require.NoError(t, err)
+			require.Equal(t, "second", latest.Aggregate().(*userAccount).Name)
+		})
 	}
 }
