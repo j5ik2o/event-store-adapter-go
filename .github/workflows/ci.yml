@@ -10,6 +10,13 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Verify conformance data
+        run: |
+          python3 tools/conformance/manifest.py verify
+          echo "61c26614dbbfba88eebce72cc1d2b0220218839e74dcfb64c19268f7ee2302ce  conformance/manifest.json" | sha256sum -c -
       - uses: actions/setup-go@v7
         with:
           go-version: '1.27'
