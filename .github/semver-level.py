@@ -1,31 +1,37 @@
 #! /usr/bin/env python3
-# -*- coding: utf-8 -*-
-import sys
-import csv
 import re
+import sys
 
-commit_messages = {'BREAKING CHANGE': 0, 'build': 0, 'ci': 0, 'feat': 0, 'fix': 0, 'docs': 0, 'style': 0, 'refactor': 0, 'perf': 0, 'test': 0, 'revert': 0, 'chore': 0}
 
-rules = {'major': ['perf', 'BREAKING CHANGE'], 'minor': ['feat', 'revert'], 'patch': ['build', 'ci', 'fix', 'docs', 'style', 'refactor', 'chore', 'test']}
+SUBJECT = re.compile(r"^(?P<type>[a-z]+)(?:\([^\r\n]*\))?(?P<breaking>!)?:")
+BREAKING_CHANGE = re.compile(r"^BREAKING(?: CHANGE|-CHANGE):", re.MULTILINE)
 
-cin = csv.reader(sys.stdin, delimiter="\t")
 
-def match_append(key, row):
-    r = re.match(f"^{key}(.*)?\: (.*)", row[2])
-    if r:
-        commit_messages[key]+=1
+def semver_level(commit_log):
+    """Read git log --pretty=format:'%s%x1f%b%x1e' and return the highest bump."""
+    level = None
+    for record in commit_log.split("\x1e"):
+        record = record.lstrip("\r\n")
+        if not record:
+            continue
+        subject, body = record.split("\x1f", 1)
+        match = SUBJECT.match(subject)
+        if (
+            (match and match.group("breaking"))
+            or BREAKING_CHANGE.search(body)
+            or BREAKING_CHANGE.match(subject)
+        ):
+            return "major"
+        if match:
+            if match.group("type") in {"feat", "revert"}:
+                level = "minor"
+            elif level is None:
+                level = "patch"
+    return level
 
-for row in cin:
-    for key in commit_messages.keys():
-        match_append(key, row)
 
-if sum(commit_messages.values()) > 0:
-    for k,v in rules.items():
-        sum = 0
-        for t in v:
-            sum += commit_messages[t]
-        if sum > 0:
-            print(k)
-            break
-else:
-    sys.exit(-1)
+if __name__ == "__main__":
+    level = semver_level(sys.stdin.read())
+    if level is None:
+        sys.exit(1)
+    print(level)
