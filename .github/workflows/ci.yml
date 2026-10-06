@@ -48,11 +48,30 @@ jobs:
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
           actionlint
+  conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27'
+      - name: Run conformance runner
+        env:
+          CONFORMANCE_REPORT: ${{ github.workspace }}/conformance-report.json
+        run: go test -count=1 -v ./internal/conformance/...
+      - name: Upload conformance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-report
+          path: conformance-report.json
+          if-no-files-found: warn
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
     timeout-minutes: 1
-    needs: [lint, test, release-checks]
+    needs: [lint, test, release-checks, conformance]
     if: always()
     steps:
       - name: Check CI results
@@ -60,8 +79,9 @@ jobs:
           LINT_RESULT: ${{ needs.lint.result }}
           TEST_RESULT: ${{ needs.test.result }}
           RELEASE_CHECKS_RESULT: ${{ needs.release-checks.result }}
+          CONFORMANCE_RESULT: ${{ needs.conformance.result }}
         run: |
-          if [[ "$LINT_RESULT" != "success" || "$TEST_RESULT" != "success" || "$RELEASE_CHECKS_RESULT" != "success" ]]; then
-            echo "CI did not succeed: lint=$LINT_RESULT, test=$TEST_RESULT, release-checks=$RELEASE_CHECKS_RESULT"
+          if [[ "$LINT_RESULT" != "success" || "$TEST_RESULT" != "success" || "$RELEASE_CHECKS_RESULT" != "success" || "$CONFORMANCE_RESULT" != "success" ]]; then
+            echo "CI did not succeed: lint=$LINT_RESULT, test=$TEST_RESULT, release-checks=$RELEASE_CHECKS_RESULT, conformance=$CONFORMANCE_RESULT"
             exit 1
           fi
