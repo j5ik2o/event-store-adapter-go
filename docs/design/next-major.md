@@ -71,7 +71,7 @@ func AidString(id AggregateID) (string, error)
 func NewAggregateID(typeName, value string) (AggregateID, error)
 ```
 
-- 検査は封筒の構築時が基本である。保存先の各操作の入口でも同じ検査関数を呼び直す。Go では `EventEnvelope[E]{}` のゼロ値や、コンストラクタを通さない封筒を作れるので、それを弾くためである。ゼロ値の封筒は、aid が空で T-2 の必須要素が欠けるので契約違反になる。seq_nr 0 は W-6。W-9（スナップショットとイベントの番号の比較）は入口だけで行う。MEM-5 は T-9・T-11・T-12・T-13 の検査を要求する。
+- 検査は封筒の構築時が基本である。保存先の各操作の入口でも同じ検査関数を呼び直す。Go では `EventEnvelope[E]{}` のゼロ値や、コンストラクタを通さない封筒を作れるので、それを弾くためである。ゼロ値の封筒は、aid が空で T-2 の必須要素が欠けるので契約違反になる。`AggregateID` は interface なので、利用者は `nil` を渡せる。`AidString`・`NewEventEnvelope`・`NewSnapshotEnvelope` と各操作の入口は、`TypeName()` を呼ぶ前に `nil` を検査し、panic せずに、ゼロ値の封筒と同じく契約違反を返す。必須要素の欠落（T-2・T-10）をどの分類にするかは仕様が定めないので、10章に書く。seq_nr 0 は W-6。W-9（スナップショットとイベントの番号の比較）は入口だけで行う。MEM-5 は T-9・T-11・T-12・T-13 の検査を要求する。
 - 保存先は検査済みの文字列だけを使う。DynamoDB の PK は aid 文字列そのもの（DY-16）。
 - ハッシュで識別しない。前方一致で選ばない（MEM-5）。
 
@@ -552,7 +552,7 @@ type record struct {
 
 ### 4.6 読み取り（DY-9・DY-10・DY-11・R-8）
 
-- `GetLatestSnapshotByID`: head と snapshot の現在（`skey=0`）を1回の `BatchGetItem`（強整合）で読む。`UnprocessedKeys` は読み切るまで再要求する（DY-9）。ヘッドがなければ「なし」。あれば封筒（なければなし）とヘッド seq_nr の組（DY-10）。
+- `GetLatestSnapshotByID`: head と snapshot の現在（`skey=0`）を1回の `BatchGetItem`（強整合）で読む。`UnprocessedKeys` は読み切るまで再要求する（DY-9）。再要求は、残ったキーだけを強整合のまま指数バックオフで行い、上限と待ち時間は設定照合（2.8）と同じ（`ConfigurationReadRetryLimit`。既定10回。初回は数えない）にする。上限に達したら、未処理のキーを「ない」と判定せず、`StorageError` を返す（設計の判断。DY-9 は上限を定めないが、上限がないと期限のない `context` で呼び出しが戻らないおそれがある）。ヘッドがなければ「なし」。あれば封筒（なければなし）とヘッド seq_nr の組（DY-10）。
 - 2項目の読み取りは原子的でない（R-8）。`TransactGetItems` は使わない（P-25）。この性質を doc コメントに書く。
 - `GetEventsByIDSinceSeqNr`: journal を `aid = :aid AND seq_nr >= :seq_nr`、`ConsistentRead=true` で `Query` する。昇順。`LastEvaluatedKey` が返る間は読み切る（DY-11・R-5）。
 
@@ -882,7 +882,11 @@ docker run --rm -p 8000:8000 \
 
 ## 10. 未解決の疑問
 
-現時点で未解決の疑問はない。旧1〜9は、指揮役のレビュー（1回目）と2026-10-06の決定で本文に反映した。
+旧1〜9は、指揮役のレビュー（1回目）と2026-10-06の決定で本文に反映した（下の箇条書き）。未解決の疑問は次の1つである。
+
+1. **必須要素の欠落（T-2・T-10）の分類**: 4章の契約違反の表は W-6・W-9・T-9・T-11〜T-13 と W-8 の飛び番だけで、必須要素の欠落を挙げない。この文書は、Go では panic を避けて error で返すため、ゼロ値の封筒と `nil` の `AggregateID` を契約違反として返す（設計の判断。2.1）。仕様が分類を定めたら、それに従う。
+
+反映済みの旧1〜9:
 
 - 障害の段階は12種類（5.4）。
 - `fnv1a64` は最初のメジャーでは対象外（5.1）。
