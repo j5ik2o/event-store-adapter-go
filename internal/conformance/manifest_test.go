@@ -66,6 +66,24 @@ func TestVerifyManifest(t *testing.T) {
 		assert.False(t, r.Verified)
 	})
 
+	t.Run("an unknown field in the manifest is a mismatch", func(t *testing.T) {
+		root := copyTree(t)
+		replaceInFile(t, filepath.Join(root, "manifest.json"), `"format": "manifest"`, `"format": "manifest", "extra": true`)
+		r, err := VerifyManifest(root)
+		require.NoError(t, err)
+		assert.False(t, r.Verified)
+		assert.True(t, containsPath(r.Mismatches, `unknown field "extra"`), r.Mismatches)
+	})
+
+	t.Run("an unknown field in a file entry is a mismatch", func(t *testing.T) {
+		root := copyTree(t)
+		replaceInFile(t, filepath.Join(root, "manifest.json"), `"path": ".gitattributes"`, `"path": ".gitattributes", "extra": true`)
+		r, err := VerifyManifest(root)
+		require.NoError(t, err)
+		assert.False(t, r.Verified)
+		assert.True(t, containsPath(r.Mismatches, `files[0]: unknown field "extra"`), r.Mismatches)
+	})
+
 	t.Run("a broken manifest is a runner error", func(t *testing.T) {
 		root := copyTree(t)
 		require.NoError(t, os.WriteFile(filepath.Join(root, "manifest.json"), []byte(`{`), 0o644))

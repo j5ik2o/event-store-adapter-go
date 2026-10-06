@@ -7,8 +7,32 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 )
+
+// sha256Hex is the digest form that conformance/schema/manifest.schema.json allows.
+var sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// unknownKeys reports the keys of obj outside allowed, as the schema sets additionalProperties to false.
+func unknownKeys(where string, obj map[string]any, allowed ...string) []string {
+	ok := map[string]bool{}
+	for _, k := range allowed {
+		ok[k] = true
+	}
+	var keys []string
+	for k := range obj {
+		if !ok[k] {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, fmt.Sprintf("%s: unknown field %q", where, k))
+	}
+	return out
+}
 
 // ManifestResult is the outcome of comparing manifest.json with the actual files.
 type ManifestResult struct {
@@ -50,6 +74,7 @@ func VerifyManifest(root string) (ManifestResult, error) {
 	if !ok {
 		return res, fmt.Errorf("manifest.json: top level is not an object")
 	}
+	res.Mismatches = append(res.Mismatches, unknownKeys("manifest.json", obj, "format", "version", "files")...)
 	if obj["format"] != "manifest" {
 		res.Mismatches = append(res.Mismatches, fmt.Sprintf("manifest.json: format is %v, want manifest", obj["format"]))
 	}
@@ -70,6 +95,10 @@ func VerifyManifest(root string) (ManifestResult, error) {
 		h, hok := e["sha256"].(string)
 		if !pok || !hok {
 			return res, fmt.Errorf("manifest.json: files[%d] needs string path and sha256", i)
+		}
+		res.Mismatches = append(res.Mismatches, unknownKeys(fmt.Sprintf("manifest.json: files[%d]", i), e, "path", "sha256")...)
+		if !sha256Hex.MatchString(h) {
+			res.Mismatches = append(res.Mismatches, fmt.Sprintf("manifest.json: files[%d]: sha256 is not 64 lowercase hex digits", i))
 		}
 		declared = append(declared, manifestEntry{Path: p, SHA256: h})
 	}
