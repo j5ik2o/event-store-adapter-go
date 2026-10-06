@@ -47,11 +47,15 @@ func TestLoadRequired(t *testing.T) {
 
 func TestEvaluateRequired(t *testing.T) {
 	results := []CaseResult{
-		{ID: "u", Status: Status("unverified"), Reason: "r", Backends: []string{"memory", "dynamodb"}},
-		{ID: "n", Status: Status("not-applicable"), Reason: "r", Backends: []string{"memory", "dynamodb"}},
-		{ID: "f", Status: Status("failure"), Reason: "r", Backends: []string{"memory"}},
-		{ID: "s", Status: Status("success"), Reason: "r", Backends: []string{"memory"}},
-		{ID: "d", Status: Status("success"), Reason: "r", Backends: []string{"dynamodb"}},
+		{ID: "u", Status: Status("unverified"), Reason: "r", Backend: "memory"},
+		{ID: "u", Status: Status("unverified"), Reason: "r", Backend: "dynamodb"},
+		{ID: "n", Status: Status("not-applicable"), Reason: "r", Backend: "memory"},
+		{ID: "n", Status: Status("not-applicable"), Reason: "r", Backend: "dynamodb"},
+		{ID: "f", Status: Status("failure"), Reason: "r", Backend: "memory"},
+		{ID: "s", Status: Status("success"), Reason: "r", Backend: "memory"},
+		{ID: "d", Status: Status("success"), Reason: "r", Backend: "dynamodb"},
+		{ID: "split", Status: Status("success"), Reason: "r", Backend: "memory"},
+		{ID: "split", Status: Status("unverified"), Reason: "r", Backend: "dynamodb"},
 	}
 
 	t.Run("empty list has no violations", func(t *testing.T) {
@@ -86,5 +90,15 @@ func TestEvaluateRequired(t *testing.T) {
 	t.Run("id placed under a backend the case does not target is a runner error", func(t *testing.T) {
 		_, err := EvaluateRequired(RequiredList{"memory": {}, "dynamodb": {"f"}}, results)
 		assert.Error(t, err)
+	})
+	t.Run("a case is judged by its own backend: memory success does not hide dynamodb unverified", func(t *testing.T) {
+		g, err := EvaluateRequired(RequiredList{"memory": {"split"}, "dynamodb": {}}, results)
+		require.NoError(t, err)
+		assert.Empty(t, g.Violations)
+
+		g, err = EvaluateRequired(RequiredList{"memory": {}, "dynamodb": {"split"}}, results)
+		require.NoError(t, err)
+		require.Len(t, g.Violations, 1)
+		assert.Contains(t, g.Violations[0], "dynamodb")
 	})
 }

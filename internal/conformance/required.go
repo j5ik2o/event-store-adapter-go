@@ -56,13 +56,16 @@ func LoadRequired(path string) (RequiredList, error) {
 	return req, nil
 }
 
-// EvaluateRequired records a violation for each listed case whose status is failure or unverified.
-// An ID that is not in the results, or that is listed under a backend the case does not target,
-// is an error of the runner.
+// EvaluateRequired records a violation for each listed case whose status is failure or unverified
+// on the listed backend. An ID that is not in the results, or that is listed under a backend
+// the case does not target, is an error of the runner.
 func EvaluateRequired(req RequiredList, results []CaseResult) (GateResult, error) {
-	byID := make(map[string]CaseResult, len(results))
+	type key struct{ id, backend string }
+	byKey := make(map[key]CaseResult, len(results))
+	knownID := make(map[string]bool, len(results))
 	for _, r := range results {
-		byID[r.ID] = r
+		byKey[key{r.ID, r.Backend}] = r
+		knownID[r.ID] = true
 	}
 	gate := GateResult{Lists: req, Violations: []string{}}
 	backends := make([]string, 0, len(req))
@@ -79,15 +82,11 @@ func EvaluateRequired(req RequiredList, results []CaseResult) (GateResult, error
 			return GateResult{}, fmt.Errorf("required list has unknown backend %q", backend)
 		}
 		for _, id := range req[backend] {
-			r, ok := byID[id]
-			if !ok {
+			if !knownID[id] {
 				return GateResult{}, fmt.Errorf("required case %q (%s) is not in the data", id, backend)
 			}
-			targeted := false
-			for _, b := range r.Backends {
-				targeted = targeted || b == backend
-			}
-			if !targeted {
+			r, ok := byKey[key{id, backend}]
+			if !ok {
 				return GateResult{}, fmt.Errorf("required case %q is listed under %s but does not target it", id, backend)
 			}
 			if r.Status == StatusFailure || r.Status == StatusUnverified {

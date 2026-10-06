@@ -57,6 +57,8 @@ type Data struct {
 	Values    []ValueCase
 	Scenarios []ScenarioCase
 	Layouts   []LayoutCase
+	// Exclusions are the rules of coverage.json that have no case.
+	Exclusions []RuleExclusion
 }
 
 var valueOperations = map[string]bool{
@@ -83,11 +85,25 @@ func expectedFormat(rel string) (string, bool) {
 	return "", false
 }
 
-// LoadData reads every file under root, checks format and version of the data JSON,
-// loads the cases and expands generators.
+// RuleExclusion is a rule of coverage.json that has no case, with the reason.
+type RuleExclusion struct {
+	Rule   string `json:"rule"`
+	Status string `json:"status"`
+	Reason string `json:"reason"`
+}
+
+type dataDoc struct {
+	rel    string
+	format string
+	obj    map[string]any
+}
+
+// LoadData reads every file under root, validates each data JSON against its schema in
+// conformance/schema, checks format and version, loads the cases and expands generators.
+// Schema validation runs before generators are expanded.
 func LoadData(root string) (*Data, error) {
-	d := &Data{}
-	ids := map[string]string{}
+	schemas := map[string]any{}
+	var docs []dataDoc
 	err := filepath.WalkDir(root, func(p string, e fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -115,6 +131,7 @@ func LoadData(root string) (*Data, error) {
 			return fmt.Errorf("%s: %w", rel, err)
 		}
 		if strings.HasPrefix(rel, "schema/") {
+			schemas[rel] = doc
 			return nil
 		}
 		format, ok := expectedFormat(rel)
@@ -125,22 +142,70 @@ func LoadData(root string) (*Data, error) {
 		if !ok {
 			return fmt.Errorf("%s: top level is not an object", rel)
 		}
-		if obj["format"] != format {
-			return fmt.Errorf("%s: format is %v, want %s", rel, obj["format"], format)
-		}
-		if obj["version"] != DataVersion {
-			return fmt.Errorf("%s: version is %v, want %s", rel, obj["version"], DataVersion)
-		}
-		switch format {
-		case "values", "scenarios", "layout":
-			return loadCases(d, rel, format, obj, ids)
-		}
+		docs = append(docs, dataDoc{rel: rel, format: format, obj: obj})
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+
+	formats := map[string]bool{}
+	var formatList []string
+	for _, dd := range docs {
+		if !formats[dd.format] {
+			formats[dd.format] = true
+			formatList = append(formatList, dd.format)
+		}
+	}
+	set, err := newSchemaSet(schemas, formatList)
+	if err != nil {
+		return nil, err
+	}
+
+	d := &Data{}
+	ids := map[string]string{}
+	for _, dd := range docs {
+		if err := set.validate(dd.format, dd.obj); err != nil {
+			return nil, fmt.Errorf("%s: schema validation: %w", dd.rel, err)
+		}
+		if dd.obj["format"] != dd.format {
+			return nil, fmt.Errorf("%s: format is %v, want %s", dd.rel, dd.obj["format"], dd.format)
+		}
+		if dd.obj["version"] != DataVersion {
+			return nil, fmt.Errorf("%s: version is %v, want %s", dd.rel, dd.obj["version"], DataVersion)
+		}
+		switch dd.format {
+		case "values", "scenarios", "layout":
+			err = loadCases(d, dd.rel, dd.format, dd.obj, ids)
+		case "coverage":
+			err = loadExclusions(d, dd.rel, dd.obj)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
 	return d, nil
+}
+
+func loadExclusions(d *Data, rel string, obj map[string]any) error {
+	list, ok := obj["exclusions"].([]any)
+	if !ok {
+		return fmt.Errorf("%s: exclusions is not an array", rel)
+	}
+	for i, item := range list {
+		m, ok := item.(map[string]any)
+		if !ok {
+			return fmt.Errorf("%s: exclusions[%d] is not an object", rel, i)
+		}
+		rule, rok := m["rule"].(string)
+		status, sok := m["status"].(string)
+		reason, nok := m["reason"].(string)
+		if !rok || !sok || !nok {
+			return fmt.Errorf("%s: exclusions[%d] needs string rule, status and reason", rel, i)
+		}
+		d.Exclusions = append(d.Exclusions, RuleExclusion{Rule: rule, Status: status, Reason: reason})
+	}
+	return nil
 }
 
 func loadCases(d *Data, rel, format string, obj map[string]any, ids map[string]string) error {

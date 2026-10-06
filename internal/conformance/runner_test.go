@@ -3,13 +3,17 @@ package conformance
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"testing"
 )
 
 // TestConformance is the entry point used by CI: it loads the data, verifies the manifest,
 // classifies every case, evaluates required.json, always writes the report, and only then decides failure.
+// It runs only in the conformance CI job, which sets CONFORMANCE_REPORT to the report path.
 func TestConformance(t *testing.T) {
+	path := os.Getenv("CONFORMANCE_REPORT")
+	if path == "" {
+		t.Skip("CONFORMANCE_REPORT is not set; this entry point runs in the conformance CI job")
+	}
 	var errs []string
 	root := dataRoot()
 
@@ -19,11 +23,13 @@ func TestConformance(t *testing.T) {
 	}
 
 	var results []CaseResult
+	var excluded []RuleExclusion
 	d, err := LoadData(root)
 	if err != nil {
 		errs = append(errs, "load: "+err.Error())
 	} else {
 		results = classifyCases(d)
+		excluded = d.Exclusions
 	}
 
 	var gate GateResult
@@ -36,12 +42,8 @@ func TestConformance(t *testing.T) {
 		gate = g
 	}
 
-	rep := BuildReport(m, results, gate, errs)
+	rep := BuildReport(m, results, excluded, gate, errs)
 
-	path := os.Getenv("CONFORMANCE_REPORT")
-	if path == "" {
-		path = filepath.Join(t.TempDir(), "conformance-report.json")
-	}
 	if err := WriteReport(path, rep); err != nil {
 		t.Fatalf("write report: %v", err)
 	}

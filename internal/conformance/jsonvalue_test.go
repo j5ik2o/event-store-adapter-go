@@ -44,8 +44,16 @@ func TestBigInt(t *testing.T) {
 		assert.Equal(t, "-1", n.String())
 	})
 
-	t.Run("non-integer numbers are rejected", func(t *testing.T) {
-		for _, s := range []string{"1.0", "1e3", "0.5"} {
+	t.Run("integer values spelled with a fraction or exponent are accepted", func(t *testing.T) {
+		for s, want := range map[string]string{"1.0": "1", "1e3": "1000", "-1.0e0": "-1", "12E1": "120"} {
+			n, err := bigIntFromJSONNumber(json.Number(s))
+			require.NoError(t, err, s)
+			assert.Equal(t, want, n.String(), s)
+		}
+	})
+
+	t.Run("numbers with a fractional part are rejected", func(t *testing.T) {
+		for _, s := range []string{"0.5", "1e-1", "1.5"} {
 			_, err := bigIntFromJSONNumber(json.Number(s))
 			assert.Error(t, err, s)
 		}
@@ -72,4 +80,16 @@ func TestBigInt(t *testing.T) {
 		_, err := bigIntFromDecimalString(json.Number("1"))
 		assert.Error(t, err)
 	})
+}
+
+func TestDecodeStrictJSON_InvalidUTF8(t *testing.T) {
+	for name, in := range map[string][]byte{
+		"string value": {'"', 0xff, '"'},
+		"object key":   append(append([]byte(`{"`), 0xc3), []byte(`":1}`)...),
+	} {
+		_, err := decodeStrictJSON(in)
+		assert.Error(t, err, name)
+	}
+	_, err := decodeStrictJSON([]byte(`"あ"`))
+	assert.NoError(t, err)
 }

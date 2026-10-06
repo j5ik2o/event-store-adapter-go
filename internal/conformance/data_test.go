@@ -1,6 +1,7 @@
 package conformance
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,7 +14,7 @@ func TestLoadData(t *testing.T) {
 	t.Run("reads the real data: 116 cases, 30 value cases", func(t *testing.T) {
 		d, err := LoadData(dataRoot())
 		require.NoError(t, err)
-		assert.Len(t, classifyCases(d), 116)
+		assert.Equal(t, 116, distinctIDs(classifyCases(d)))
 		assert.Len(t, d.Values, 30)
 	})
 
@@ -95,7 +96,7 @@ func TestLoadData_DuplicateID(t *testing.T) {
 	t.Run("real data has unique ids", func(t *testing.T) {
 		d, err := LoadData(dataRoot())
 		require.NoError(t, err)
-		assert.Len(t, classifyCases(d), 116)
+		assert.Equal(t, 116, distinctIDs(classifyCases(d)))
 	})
 
 	t.Run("duplicate id across files is rejected and named", func(t *testing.T) {
@@ -105,4 +106,70 @@ func TestLoadData_DuplicateID(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "seq-zero-value")
 	})
+}
+
+func distinctIDs(rs []CaseResult) int {
+	seen := map[string]bool{}
+	for _, r := range rs {
+		seen[r.ID] = true
+	}
+	return len(seen)
+}
+
+func TestLoadData_SchemaValidation(t *testing.T) {
+	t.Run("a scenario without description is rejected by the scenarios schema", func(t *testing.T) {
+		root := copyTree(t)
+		files, err := filepath.Glob(filepath.Join(root, "scenarios", "core", "*.json"))
+		require.NoError(t, err)
+		require.NotEmpty(t, files)
+		b, err := os.ReadFile(files[0])
+		require.NoError(t, err)
+		var doc map[string]any
+		require.NoError(t, json.Unmarshal(b, &doc))
+		delete(doc["cases"].([]any)[0].(map[string]any), "description")
+		out, err := json.Marshal(doc)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(files[0], out, 0o644))
+		_, err = LoadData(root)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "schema validation")
+	})
+
+	t.Run("an unknown property in a value case is rejected", func(t *testing.T) {
+		root := copyTree(t)
+		replaceInFile(t, filepath.Join(root, "values", "hash.json"), `"id": "hash-fnv1a64-1"`, `"extra": true, "id": "hash-fnv1a64-1"`)
+		_, err := LoadData(root)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "schema validation")
+	})
+
+	t.Run("an invalid generator is caught by the schema before expansion", func(t *testing.T) {
+		root := copyTree(t)
+		replaceInFile(t, filepath.Join(root, "dynamodb", "read.json"), `"byte_length": 320000`, `"byte_length": 0`)
+		_, err := LoadData(root)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "schema validation")
+	})
+
+	t.Run("a missing schema file is an error", func(t *testing.T) {
+		root := copyTree(t)
+		require.NoError(t, os.Remove(filepath.Join(root, "schema", "layout.schema.json")))
+		_, err := LoadData(root)
+		assert.Error(t, err)
+	})
+}
+
+func TestLoadData_Exclusions(t *testing.T) {
+	d, err := LoadData(dataRoot())
+	require.NoError(t, err)
+	byRule := map[string]RuleExclusion{}
+	for _, e := range d.Exclusions {
+		byRule[e.Rule] = e
+	}
+	require.Contains(t, byRule, "W-5")
+	require.Contains(t, byRule, "R-7")
+	assert.Equal(t, "deleted", byRule["W-5"].Status)
+	assert.Equal(t, "caller-obligation", byRule["R-7"].Status)
+	assert.NotEmpty(t, byRule["W-5"].Reason)
+	assert.NotEmpty(t, byRule["R-7"].Reason)
 }

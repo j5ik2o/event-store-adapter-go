@@ -20,11 +20,12 @@ const (
 
 var allStatuses = []Status{StatusSuccess, StatusFailure, StatusNotApplicable, StatusUnverified, StatusUnrepresentable}
 
-// CaseResult is the report entry of one case.
+// CaseResult is the report entry of one case on one backend. Value-table cases have no
+// backend, so Backend is empty for them.
 type CaseResult struct {
 	ID         string   `json:"id"`
 	Rules      []string `json:"rules"`
-	Backends   []string `json:"backends"`
+	Backend    string   `json:"backend,omitempty"`
 	Status     Status   `json:"status"`
 	Reason     string   `json:"reason"`
 	FailedStep *int     `json:"failed_step"`
@@ -53,6 +54,7 @@ type Report struct {
 	Backends       []BackendState            `json:"backends"`
 	Summary        map[Status]int            `json:"summary"`
 	Rules          map[string]map[Status]int `json:"rules"`
+	ExcludedRules  []RuleExclusion           `json:"excluded_rules"`
 	Cases          []CaseResult              `json:"cases"`
 	Required       GateResult                `json:"required"`
 	Errors         []string                  `json:"errors"`
@@ -64,11 +66,11 @@ const (
 	reasonNoStore = "場面と値の表の操作は実行していない。中核と保存先に未接続（設計 7.2 の2番）"
 )
 
-// classifyCases decides the status and the reason of every case. Nothing is executed yet,
-// so the status is either not-applicable or unverified, never success.
+// classifyCases decides the status and the reason of every case on every backend it targets.
+// Nothing is executed yet, so the status is either not-applicable or unverified, never success.
 func classifyCases(d *Data) []CaseResult {
-	classify := func(id string, rules, backends []string, fnv bool, precision string) CaseResult {
-		r := CaseResult{ID: id, Rules: nonNil(rules), Backends: nonNil(backends)}
+	classify := func(id string, rules []string, backend string, fnv bool, precision string) CaseResult {
+		r := CaseResult{ID: id, Rules: nonNil(rules), Backend: backend}
 		switch {
 		case fnv:
 			r.Status, r.Reason = StatusNotApplicable, reasonFnv1a64
@@ -81,13 +83,15 @@ func classifyCases(d *Data) []CaseResult {
 	}
 	var out []CaseResult
 	for _, c := range d.Values {
-		out = append(out, classify(c.ID, c.Rules, nil, c.Operation == "fnv1a64", c.TimePrecision))
+		out = append(out, classify(c.ID, c.Rules, "", c.Operation == "fnv1a64", c.TimePrecision))
 	}
 	for _, c := range d.Scenarios {
-		out = append(out, classify(c.ID, c.Rules, c.Backends, false, c.TimePrecision))
+		for _, b := range c.Backends {
+			out = append(out, classify(c.ID, c.Rules, b, false, c.TimePrecision))
+		}
 	}
 	for _, c := range d.Layouts {
-		out = append(out, classify(c.ID, c.Rules, []string{"dynamodb"}, false, ""))
+		out = append(out, classify(c.ID, c.Rules, "dynamodb", false, ""))
 	}
 	return out
 }
@@ -107,11 +111,32 @@ func zeroCounts() map[Status]int {
 	return m
 }
 
+// implementationVersion names the revision under test. A module version is used when there
+// is one; for a checkout build ("(devel)") it falls back to the vcs.revision build setting,
+// then to GITHUB_SHA set by GitHub Actions.
+func implementationVersion(bi *debug.BuildInfo, ok bool, getenv func(string) string) string {
+	if ok && bi != nil {
+		if v := bi.Main.Version; v != "" && v != "(devel)" {
+			return v
+		}
+		for _, s := range bi.Settings {
+			if s.Key == "vcs.revision" && s.Value != "" {
+				return s.Value
+			}
+		}
+	}
+	if sha := getenv("GITHUB_SHA"); sha != "" {
+		return sha
+	}
+	return "(devel)"
+}
+
 // BuildReport assembles the report. Every status key is present in the counts.
-func BuildReport(m ManifestResult, results []CaseResult, gate GateResult, errs []string) Report {
-	version := "(devel)"
-	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" {
-		version = bi.Main.Version
+func BuildReport(m ManifestResult, results []CaseResult, excluded []RuleExclusion, gate GateResult, errs []string) Report {
+	bi, ok := debug.ReadBuildInfo()
+	version := implementationVersion(bi, ok, os.Getenv)
+	if excluded == nil {
+		excluded = []RuleExclusion{}
 	}
 	if m.Mismatches == nil {
 		m.Mismatches = []string{}
@@ -141,6 +166,7 @@ func BuildReport(m ManifestResult, results []CaseResult, gate GateResult, errs [
 		Backends:       []BackendState{{Name: "memory"}, {Name: "dynamodb"}},
 		Summary:        zeroCounts(),
 		Rules:          map[string]map[Status]int{},
+		ExcludedRules:  excluded,
 		Cases:          results,
 		Required:       gate,
 		Errors:         errs,

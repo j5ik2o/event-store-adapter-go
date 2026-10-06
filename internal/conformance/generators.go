@@ -82,18 +82,19 @@ func materialize(c map[string]any) (map[string]any, error) {
 		if !ok || utf8.RuneCountInString(chStr) != 1 {
 			return nil, fmt.Errorf("generators[%d]: character must be one Unicode character", i)
 		}
-		r, _ := utf8.DecodeRuneInString(chStr)
-		if r == utf8.RuneError {
+		r, size := utf8.DecodeRuneInString(chStr)
+		if r == utf8.RuneError && size <= 1 {
 			return nil, fmt.Errorf("generators[%d]: character is not valid UTF-8", i)
 		}
 		num, ok := g["byte_length"].(json.Number)
 		if !ok {
 			return nil, fmt.Errorf("generators[%d].byte_length is not a number", i)
 		}
-		length, err := strconv.Atoi(num.String())
-		if err != nil || length <= 0 {
+		n, err := bigIntFromJSONNumber(num)
+		if err != nil || n.Sign() <= 0 || !n.IsInt64() || int64(int(n.Int64())) != n.Int64() {
 			return nil, fmt.Errorf("generators[%d].byte_length %q is not a positive integer", i, num)
 		}
+		length := int(n.Int64())
 		if length%utf8.RuneLen(r) != 0 {
 			return nil, fmt.Errorf("generators[%d]: byte_length %d is not a multiple of the %d-byte character", i, length, utf8.RuneLen(r))
 		}

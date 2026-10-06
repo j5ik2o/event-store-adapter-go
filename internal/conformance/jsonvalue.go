@@ -8,11 +8,15 @@ import (
 	"io"
 	"math/big"
 	"regexp"
+	"unicode/utf8"
 )
 
 // decodeStrictJSON decodes a single JSON value. Numbers are kept as json.Number,
 // duplicate keys in the same object, NaN, Infinity and trailing data are rejected.
 func decodeStrictJSON(data []byte) (any, error) {
+	if !utf8.Valid(data) {
+		return nil, errors.New("JSON is not valid UTF-8")
+	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 	v, err := decodeValue(dec)
@@ -79,17 +83,18 @@ func decodeValue(dec *json.Decoder) (any, error) {
 	return nil, fmt.Errorf("unexpected delimiter %v", delim)
 }
 
-// bigIntFromJSONNumber converts a json.Number that is an integer literal into a big.Int.
+// bigIntFromJSONNumber converts a json.Number whose mathematical value is an integer
+// (1, 1.0 and 1e3 included) into a big.Int. Values with a fractional part are rejected.
 func bigIntFromJSONNumber(v any) (*big.Int, error) {
 	n, ok := v.(json.Number)
 	if !ok {
 		return nil, fmt.Errorf("expected a JSON number, got %T", v)
 	}
-	i, ok := new(big.Int).SetString(n.String(), 10)
-	if !ok {
-		return nil, fmt.Errorf("%q is not an integer literal", n.String())
+	r, ok := new(big.Rat).SetString(n.String())
+	if !ok || !r.IsInt() {
+		return nil, fmt.Errorf("%q is not an integer", n.String())
 	}
-	return i, nil
+	return new(big.Int).Set(r.Num()), nil
 }
 
 var decimalString = regexp.MustCompile(`^-?[0-9]+$`)

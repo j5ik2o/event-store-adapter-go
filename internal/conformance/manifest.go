@@ -51,7 +51,7 @@ type manifestEntry struct {
 // tools/conformance/manifest.py. Differences are reported as Mismatches; an error is
 // returned only when the comparison itself cannot be done.
 func VerifyManifest(root string) (ManifestResult, error) {
-	res := ManifestResult{Version: DataVersion, Mismatches: []string{}}
+	res := ManifestResult{Mismatches: []string{}}
 
 	actual, symlinks, err := inventory(root)
 	if err != nil {
@@ -77,6 +77,9 @@ func VerifyManifest(root string) (ManifestResult, error) {
 	res.Mismatches = append(res.Mismatches, unknownKeys("manifest.json", obj, "format", "version", "files")...)
 	if obj["format"] != "manifest" {
 		res.Mismatches = append(res.Mismatches, fmt.Sprintf("manifest.json: format is %v, want manifest", obj["format"]))
+	}
+	if v, ok := obj["version"].(string); ok {
+		res.Version = v
 	}
 	if obj["version"] != DataVersion {
 		res.Mismatches = append(res.Mismatches, fmt.Sprintf("manifest.json: version is %v, want %s", obj["version"], DataVersion))

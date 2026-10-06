@@ -53,6 +53,13 @@ func TestVerifyManifest(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, r.Verified)
 		assert.NotEmpty(t, r.Mismatches)
+		assert.Equal(t, "9.9.9", r.Version, "the report names the manifest version that was read")
+	})
+
+	t.Run("the real manifest reports its own version", func(t *testing.T) {
+		r, err := VerifyManifest(dataRoot())
+		require.NoError(t, err)
+		assert.Equal(t, DataVersion, r.Version)
 	})
 
 	t.Run("a symbolic link is a mismatch", func(t *testing.T) {

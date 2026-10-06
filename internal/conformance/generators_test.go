@@ -99,3 +99,35 @@ func TestLoadData_Generators(t *testing.T) {
 	}
 	assert.True(t, found, "expanded 320000-byte payload text must exist")
 }
+
+func TestMaterialize_Character(t *testing.T) {
+	t.Run("U+FFFD is a valid character", func(t *testing.T) {
+		c := genCase(map[string]any{"a": ""}, gen("/fixtures/events/e1/payload/a", "\uFFFD", 6))
+		out, err := materialize(c)
+		require.NoError(t, err)
+		assert.Equal(t, "\uFFFD\uFFFD", payloadOf(t, out)["a"])
+	})
+
+	t.Run("an invalid one-byte encoding is rejected", func(t *testing.T) {
+		c := genCase(map[string]any{"a": ""}, gen("/fixtures/events/e1/payload/a", "\xff", 1))
+		_, err := materialize(c)
+		assert.Error(t, err)
+	})
+}
+
+func TestMaterialize_ByteLengthSpelling(t *testing.T) {
+	build := func(n string) map[string]any {
+		return genCase(map[string]any{"a": ""}, map[string]any{
+			"target": "/fixtures/events/e1/payload/a", "character": "x", "byte_length": json.Number(n),
+		})
+	}
+	for n, want := range map[string]string{"6.0": "xxxxxx", "3e0": "xxx"} {
+		out, err := materialize(build(n))
+		require.NoError(t, err, n)
+		assert.Equal(t, want, payloadOf(t, out)["a"], n)
+	}
+	for _, n := range []string{"1.5", "0", "-1", "1e30"} {
+		_, err := materialize(build(n))
+		assert.Error(t, err, n)
+	}
+}
