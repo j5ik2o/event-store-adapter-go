@@ -1,12 +1,12 @@
 # 次のメジャー版（v2.0.0）の設計
 
-このファイルは設計文書である。コードは書かない。指揮役がレビューし、9章の判断をオーナーが決めてから実装に使う。
+このファイルは設計文書である。コードは書かない。指揮役がレビューし、9章の判断（2026-10-06 に決定済み）を反映してから実装に使う。
 
 ## 読み方
 
 - 規則番号は、ハブ（j5ik2o/event-store-adapter）の `docs/spec/core-contract.md`・`docs/spec/storage/dynamodb.md`・`docs/spec/storage/memory.md` のものである。「CR」は `conformance/README.md`、「IP」は実装計画の節を指す。
 - この文書は仕様を変えない。規則も足さない。仕様の読み方が分からない点は10章に書く。
-- 2章の宣言は「この言語で実際に書く形」の提案である。パッケージの置き場は9章で未決なので、仮に `eventstore` と書く。確定は9章の結果による。
+- 2章の宣言は「この言語で実際に書く形」の提案である。パッケージの置き場は9章で決めた。モジュールのルート（`eventstore`）に封筒・エラー・操作の型を置き、保存先は `memory` と `dynamodb` に分ける。
 - 現行コードの事実は、2026-10-06 時点の `pkg/` と `test/` を読んで確認した。
 
 ---
@@ -32,15 +32,17 @@
 - 旧データを自動で読む機能。Go 用の移行ツール。手順書だけを用意する（IP-D8、8章）。
 - SQLite・Bigtable・Spanner などの他の保存先（IP 4.2）。
 - メモリの TTL 方式と変更フィード（MEM-12・MEM-13。要求は設定エラー）。
-- 変更フィードの補助関数の扱いは9章で、オーナーが決める。
+- 変更フィードの補助（ヘッド遷移を組み立てる関数と、再同期（DY-15）の補助）。最初のメジャーに含めない（2026-10-06 オーナー決定、IP 10）。head テーブルの Streams（NEW_IMAGE）への記録は DY-3・DY-12 のとおり残るので、利用者は自分で読める。公開 API に変更フィードの関数はない。
 
 ### 1.4 次のメジャーの版の番号
 
 現行は `v1.0.197`（`version` ファイル）。次のメジャーは `v2.0.0` とする（IP 4.2）。モジュールのパスは `github.com/j5ik2o/event-store-adapter-go/v2` に変える。パスを変えないと、v2 のタグを Go のツールチェーンが受け付けない（IP 4.2）。
 
-main の Snapshot（開発中の版）は、次のメジャーの版で公開する。PR ごとに squash マージする（IP 3）。7章で扱う。
+Go には Snapshot を公開する仕組みがない。モジュールのパスを `/v2` にすれば、利用者は main のコミットを疑似バージョン（タグのない `/v2` では `v2.0.0-<時刻>-<コミット>` の形）で取得できる。これを次のメジャーの開発版とする。PR ごとに squash マージする（IP 3）。7章で扱う。
 
-`version` ファイルは現行リリース制御（`.github/workflows/release.yml` は手動起動だけ）が読む。この文書では、リリースの仕組みの変更を提案しない。
+`version` ファイルは、手動起動だけの `.github/workflows/release.yml` が、`git describe` で得た最新のタグから版を計算して上書きする。手で `version` を変えても効かないので、変えない。正式な `v2.0.0` は、オーナーの承認の後に `level=major` で手動起動して出す。この文書では、リリースの仕組みの変更を提案しない。
+
+`/v2` に変えた後は、main から `v1.x` のタグを打てない。現行メジャーの修正が要るときは、実装計画 3章のとおり、最後のタグから `release/1.x` の保守ブランチを切る。CI と版上げのワークフローは、その時点で対応させる。
 
 ---
 
@@ -69,7 +71,7 @@ func AidString(id AggregateID) (string, error)
 func NewAggregateID(typeName, value string) (AggregateID, error)
 ```
 
-- 検査は封筒の構築時と、保存先の各操作の入口で行う。MEM-5 は T-9・T-11・T-12・T-13 の検査を要求する。
+- 検査は封筒の構築時が基本である。保存先の各操作の入口でも同じ検査関数を呼び直す。Go では `EventEnvelope[E]{}` のゼロ値や、コンストラクタを通さない封筒を作れるので、それを弾くためである。ゼロ値の封筒は、aid が空で T-2 の必須要素が欠けるので契約違反になる。seq_nr 0 は W-6。W-9（スナップショットとイベントの番号の比較）は入口だけで行う。MEM-5 は T-9・T-11・T-12・T-13 の検査を要求する。
 - 保存先は検査済みの文字列だけを使う。DynamoDB の PK は aid 文字列そのもの（DY-16）。
 - ハッシュで識別しない。前方一致で選ばない（MEM-5）。
 
@@ -89,7 +91,7 @@ func (n SeqNr) Validate() error
 func (n SeqNr) ValidateAsEventSeqNr() error
 ```
 
-- 符号付き `int64` を使う案を提示する。負数（-1）や 2^53 のケースを、型の変換で消さずに契約違反として返せる。符号なし型を使う案は9章に書く。
+- 符号付き `int64` を使う（9.3 で決定）。負数（-1）や 2^53 のケースを、型の変換で消さずに契約違反として返せる。
 - 時刻は `time.Time` を使う。`occurred_at` は `UnixNano()` を呼ぶ前に、T-13 の範囲（エポックからのナノ秒が符号付き64bitに収まる）を検査する。範囲外は契約違反。`time.Time` は年の範囲が広く、`UnixNano()` は範囲外で未定義値を返すため、先に検査する。
 - Go の `time.Time` はナノ秒を保てる。T-3 の「標準時刻型の精度まで丸めてよい」に該当する丸めは、通常は生じない。実行器は `representation.time_precision = nanoseconds` のケースを実行する（5章）。
 
@@ -279,13 +281,14 @@ func KindOf(err error) (Kind, bool)
 | 契約違反 | 違反した規則番号（例: `W-9`）、関係する seq_nr。W-9 は異なるスナップショット番号も含める | ヘッド番号を必須にしない | E-3 |
 | 契約違反（D-7 のサイズ超過） | 分類だけを検査。規則番号・メッセージの条件は足さない | — | E-3・CR |
 
-- `Error()` に原因のエラー文を連結しない。原因は `Unwrap()` だけで返す。SDK の生のエラー文が楽観ロックのメッセージに入らないようにするため（E-2）。
+- `OptimisticLockError` の `Error()` に原因のエラー文を連結しない。原因は `Unwrap()` だけで返す。SDK の生のエラー文が楽観ロックのメッセージに入らないようにするため（E-2）。この制約は楽観ロックだけに限る。ほかの分類は、Go の慣習どおり `Error()` に原因の文を `: ` でつないでよい。
 - 保存先エラーには、読み取ったデータの欠損も含める（4章の分類）。設定エラーには、生成時の不正な値と、保存先に記録された設定との食い違いを含める（P-40）。
 
 ### 2.8 設定（S-1・MEM-3・DY-8）
 
 ```go
 // RetentionCount は保持件数。S-1: 「なし」か1以上。0は設定エラー。
+// ゼロ値 RetentionCount{} は無効な値とする。「なし」は NoRetention() で明示する。
 type RetentionCount struct{ /* 非公開 */ }
 func NoRetention() RetentionCount
 func KeepLatest(n int) (RetentionCount, error) // n < 1 は ConfigurationError
@@ -300,7 +303,10 @@ const (
 type Option func(*options) error
 func WithRetentionCount(c RetentionCount) Option
 func WithRetentionMode(m RetentionMode) Option
-func WithTTLGrace(d time.Duration) Option // 猶予秒。TTL 方式のときだけ意味を持つ
+// WithTTLGraceSeconds は TTL の猶予を整数の秒で指定する。TTL 方式のときだけ意味を持つ。
+// 負の値は ConfigurationError。指定しなければ 0。
+// 適合データの ttl_grace_seconds が整数の秒（minimum: 0）で、仕様に既定値がないため、型を秒にそろえる。
+func WithTTLGraceSeconds(seconds int64) Option
 func WithRetentionFailureHandler(h func(ctx context.Context, err error)) Option // S-4。ログに追加する通知。ログの代わりではない（MEM-11）
 ```
 
@@ -315,7 +321,8 @@ type Config struct {
     HeadTableName     string
     SnapshotHistoryIndexName string // 履歴の疎な GSI の名前
     // 設定照合（DY-8）の再要求回数の上限。初回は数えない。
-    ConfigurationReadRetryLimit int
+    // nil なら既定の10回。0 なら再要求しない。負の値は ConfigurationError。
+    ConfigurationReadRetryLimit *int
 }
 
 func New[E, A any](
@@ -329,13 +336,15 @@ func New[E, A any](
 ```
 
 - テーブルとインデックスの名前は設定で与える。ライブラリは3テーブルを作らない（`dynamodb.md` 3章）。
-- 規範は上限値や既定値を定めない。再要求回数の既定値は、この文書では決めない（10章）。
+- 規範は上限値や既定値を定めない。設計として次のとおり決める。
+  - 再要求回数の既定値は10回（`ConfigurationReadRetryLimit` が nil のとき）。ゼロ値の `Config` でも既定の回数だけ再要求するので、初回の `UnprocessedKeys` だけで保存先エラーにはならない（DY-8 の趣旨）。
+  - 待ち時間は、最初が50ミリ秒で、毎回2倍、上限1秒（揺らぎなし）。
 - 設定エラーになる値:
-  - 保持件数 0（S-1）。
+  - 保持件数 0（S-1）。`KeepLatest(0)` と、ゼロ値の `RetentionCount{}`。`memory.NewStore` と `dynamodb.New` も、受け取った保持件数を検査し直して 0 を `ConfigurationError` で拒否する。適合の `core-retention-zero` は、ストア生成時の `initialization.expect.error` で設定エラーを期待するので、オプションの構築（`KeepLatest` など）の失敗も、実行器が生成の失敗として扱う（5.2）。
   - メモリで TTL 方式を要求（MEM-3・MEM-12）。
   - メモリで変更フィードを要求（MEM-3・MEM-13）。
   - DynamoDB の設定照合で、3項目の一部だけの存在・store_id の不一致・layout_version の違い（DY-8・P-40）。
-- `retention_mode` を指定しても保持件数が「なし」のときの扱いは規範にない。10章に書く。
+- 保持件数が「なし」のときは、`retention_mode` を無視し、エラーにしない。適合データの大半が `retention_count: null` と `retention_mode: delete` の組だからである。ただし、メモリで TTL 方式を指定した場合は、MEM-12 により保持件数にかかわらず設定エラーにする（設計の判断。適合データにメモリの TTL の組はない）。
 
 メモリのコンストラクタは次の形とする。
 
@@ -359,7 +368,7 @@ func New[E, A any](
 保持処理の失敗は、書き込みの結果を変えない。通知用の公開 API は規範が固定しない。
 
 - **メモリ（MEM-11・MEM-D7）**: ログで通知する。排他制御を解いた後に、標準の `log/slog` でログを出す。この通知は必須で、`WithRetentionFailureHandler` の指定の有無に左右されない。
-- **DynamoDB（S-4）**: ログかコールバックで通知する。既定は `log/slog` のログとする。
+- **DynamoDB（S-4）**: `log/slog` のログを必須とし、コールバックを追加の経路とする（9.6 で決定）。
 - `WithRetentionFailureHandler` のコールバックは、ログに**追加**する通知経路である。ログの代わりにはならない。メモリでは、排他制御を解いた後に呼ぶ。
 - ログ出力とコールバックの失敗や panic は、確定した書き込みの結果を変えない（MEM-11）。
 
@@ -373,7 +382,7 @@ func New[E, A any](
 | `AggregateResult`（`Present`・`Empty`・`Aggregate`、空のとき panic） | `SnapshotRead[A]`（ヘッド番号つき）。panic しない | R-1〜R-3 |
 | `EventStore.PersistEvent(event, version)` | `PersistEvent(ctx, event)`。version 引数を削除 | W-3・W-8 |
 | `EventStore.PersistEventAndSnapshot(event, aggregate)` | `PersistEventAndSnapshot(ctx, event, snapshot)` | W-9 |
-| `GetLatestSnapshotById(id)` | `GetLatestSnapshotByID(ctx, id)`（名前の `Id` を `ID` にそろえる案） | R-1〜R-3 |
+| `GetLatestSnapshotById(id)` | `GetLatestSnapshotByID(ctx, id)`（名前の `Id` を `ID` にそろえる。9.5） | R-1〜R-3 |
 | `GetEventsByIdSinceSeqNr(id, uint64)` | `GetEventsByIDSinceSeqNr(ctx, id, SeqNr)` | R-4〜R-6 |
 | `EventConverter`・`AggregateConverter` | 削除。`Serializer[T].Deserialize` に置き換える | T-6・T-7 |
 | `EventSerializer`・`SnapshotSerializer`（`map[string]interface{}` 経由） | `Serializer[T]`。payload だけ | T-7 |
@@ -385,7 +394,7 @@ func New[E, A any](
 | `EventStoreOption`・`WithKeepSnapshot`・`WithDeleteTtl`・`WithKeepSnapshotCount`・`WithKeyResolver`・`WithEventSerializer`・`WithSnapshotSerializer` | `Config` と `Option`。保持件数・保持の方式・猶予秒・失敗通知 | S-1・S-4 |
 | `WithKeepSnapshot(bool)` | 削除。保持件数「なし」が「履歴なし」 | S-1 |
 | `EventStoreOnMemory`・`NewEventStoreOnMemory` | `memory.New` と `memory.Store` | MEM-1〜MEM-13 |
-| `pkg/common`（試験用のテーブル作成・LocalStack クライアント） | 試験の側（`internal/testutil` など）へ移す。公開 API から外す | IP 4.2 |
+| `pkg/common`（試験用のテーブル作成・LocalStack クライアント） | 削除（旧 API を削除する PR）。試験の補助は `internal/` に新しく作る | IP 4.2 |
 | モジュールのパス `.../event-store-adapter-go` | `.../event-store-adapter-go/v2` | IP 4.2 |
 
 ---
@@ -426,7 +435,7 @@ type record struct {
 
 ### 3.2 書き込みの手順
 
-1. 封筒の検査（T-9・W-6・W-9・T-11〜T-13）。ロックの前。
+1. 入口の検査（T-9・W-6・W-9・T-11〜T-13）。ロックの前。封筒の構築時の検査を同じ関数で呼び直し、ゼロ値の封筒を弾く（2.1）。W-9 はここだけで行う。
 2. payload と、あればスナップショットの直列化。失敗は `SerializationError`。ロックの前。
 3. ロックを取る。
 4. ヘッドを読む。W-3・W-7・W-8 で照合する。違反は `OptimisticLockError` か `ContractViolationError`（飛び番）。
@@ -494,11 +503,17 @@ type record struct {
 
 1. 3つの設定項目を、1回の `BatchGetItem`（`ConsistentRead=true`）で読む。`Responses` を蓄積する。
 2. `UnprocessedKeys` があれば、そのキーだけを指数バックオフで強整合のまま再要求する。未処理がなくなるまで「存在しない」と判定しない。上限に達したら、設定エラーではなく保存先エラーにする。
-3. 3つともなければ、新しい `store_id` を作り、1回の `TransactWriteItems` で `attribute_not_exists(aid)` 条件つきの Put を3件行う。条件が成立しなければ、応答を捨てて、3件を強整合で読み直し、手順4へ進む（P-19）。
+3. 3つともなければ、新しい `store_id` を作り、1回の `TransactWriteItems` で `attribute_not_exists(aid)` 条件つきの Put を3件行う。条件が成立しなければ、応答を捨てて、3件を強整合で読み直し、手順4へ進む（P-19）。この読み直しにも手順2（DY-8）を当てはめる。`UnprocessedKeys` は上限まで再要求し、未処理が残る間は判定しない。上限に達したら保存先エラーにする。
 4. 3つともあり、`store_id` と `layout_version` が3件で一致し、自分の版（1）と同じなら、続行する。
 5. それ以外（一部だけ・`store_id` の不一致・`layout_version` の違い）は設定エラー（P-40）。
 
-設定項目は条件つき Put だけで作る。IAM は3テーブルへの `dynamodb:BatchGetItem` と `dynamodb:PutItem` で足りる。
+設定項目は条件つき Put だけで作る。
+
+権限は、試験用とライブラリ用に分ける。
+
+- ライブラリ用: 3テーブル（と GSI）に対する `BatchGetItem`・`PutItem`（設定項目）・`TransactWriteItems`・`Query`・`BatchWriteItem`・`UpdateItem` だけ。テーブルの作成はしない。
+- 試験用: 障害を差し込まない別のクライアントで、テーブルの作成と削除、`PutItem`（`seed.items` と、生成競合の `install_items`）、`GetItem`・`Query`・`DescribeTable`・`DescribeTimeToLive` を行う。
+- DynamoDB Local は IAM を検査しないので、試験ではクライアントを分けて区別する。実サービス向けの IAM の例は、文書の PR（7.2）で書く。
 
 ### 4.5 書き込み（D-5・D-6・D-7・W-8）
 
@@ -524,7 +539,15 @@ type record struct {
 | スロットリング・通信失敗・その他 | 保存先 | — |
 
 - 分類のための追加読み取りはしない（D-5）。`CancellationReasons` の `Item` の旧 seq_nr を使う。
-- D-7: 項目サイズを書き込み前に見積もる。上限は 409600 バイト。payload はジャーナルとヘッドの両方に載る。属性名・値・ヘッドの L/M の分を足して見積もる。超過は `ContractViolationError`（送信しない）。
+- D-7: 項目サイズを書き込み前に見積もる。上限は 409600 バイト。payload はジャーナルとヘッドの両方に載る。見積もる項目と属性は次のとおり。
+  - (a) ジャーナル: `aid`・`seq_nr`・`occurred_at`・`manifest`・`payload`。
+  - (b) ヘッド: `aid`・`type_name`・`seq_nr`・`events`（L の中の M 1件。`seq_nr`・`occurred_at`・`manifest`・`payload`）。
+  - (c) 現在のスナップショット: `aid`・`skey`・`seq_nr`・`manifest`・`payload`・`last_updated_at`。
+  - (d) 履歴のスナップショット: (c) に `active_history_seq_nr` を加える（書き込み時は `ttl` を持たない）。
+  - 計算: 属性名の UTF-8 バイト数と、値の大きさを足す。S は UTF-8 のバイト数、B はバイト数、N は多めに見積もって21バイト、L と M は3バイトに要素ごとの1バイトと中身を足す。
+  - 送る項目のどれか1つでも409600バイトを超えたら、送らずに `ContractViolationError` を返す。
+  - 適合データの4件との対応: `dynamodb-item-size-event` はジャーナルとヘッドの payload、`-snapshot` は現在（と履歴）の payload、`-manifest` はジャーナルとヘッドの manifest、`-head-overhead` はヘッドの `type_name` と aid と payload。
+  - データは厳密な境界を求めない（`conformance/README.md`）ので、多めの見積もりで足りる。
 - 楽観ロックのメッセージには、E-2 のとおり aid 文字列・seq_nr・（分かれば）ヘッド seq_nr だけを含める。
 
 ### 4.6 読み取り（DY-9・DY-10・DY-11・R-8）
@@ -535,27 +558,27 @@ type record struct {
 
 ### 4.7 保持処理（8章・D-9・P-18・P-24・S-3）
 
-履歴を書いた書き込みの確定後だけ、保持処理を行う（D-9）。保持件数を n とする。
+履歴を書いた書き込みの確定後だけ、保持処理を行う（D-9）。書き込みの呼び出しの中で、確定の応答の後、戻る前に同期で行う。失敗しても書き込みの結果は変えない。保持件数を n とする。
 
 1. 履歴 GSI を `aid = :aid`、`ScanIndexForward=false` で `Query` し、読み切る（KEYS_ONLY）。結果整合の読み取り（DY-18）。
 2. 今書いた履歴を加える。すでに見えていれば重ねない。降順の先頭 n 件を残し、それより古いものを対象にする（S-2）。
 3. 削除方式は、`BatchWriteItem` を25件ずつ送る（P-18）。`UnprocessedItems` は再送する。
-4. TTL 方式は、1件ずつ `UpdateItem`: `SET #ttl = :expires REMOVE active_history_seq_nr`、条件 `attribute_exists(active_history_seq_nr)`。`#ttl` は `ExpressionAttributeNames`。`:expires` は印付け時点のエポック秒 + 猶予。条件が失敗したら、印付け済みとして読み飛ばす。
+4. TTL 方式は、1件ずつ `UpdateItem`: `SET #ttl = :expires REMOVE active_history_seq_nr`、条件 `attribute_exists(active_history_seq_nr)`。`#ttl` は `ExpressionAttributeNames`。`:expires` は印付け時点のエポック秒 + `WithTTLGraceSeconds` の猶予秒（指定しなければ 0）。条件が失敗したら、印付け済みとして読み飛ばす。
 5. 失敗は書き込みの結果を変えない。S-4 の通知経路で知らせる。
 
 - 件数を数えてから超過分を選ぶ方式は使わない（P-24）。現行の `getSnapshotCount` に当たる処理は廃止する。
 - 印付き履歴は件数に数えない。期限は先送りしない（S-3）。印の条件（`attribute_exists(active_history_seq_nr)`）が、これを保つ。
 
-### 4.8 変更フィード（9章・DY-12・DY-13・DY-15）
+### 4.8 変更フィード（1.3・DY-12・DY-13・DY-15）
 
-- head の Streams を NEW_IMAGE で有効にする配置は、どの案でも維持する（DY-3・DY-12）。
-- ヘッド遷移を組み立てる関数と、再同期（DY-15）の補助を、最初のメジャーに含めるかは9章で決める。
+- head の Streams を NEW_IMAGE で有効にする配置を維持する（DY-3・DY-12）。利用者は Streams のレコードを自分で読める。
+- ヘッド遷移を組み立てる関数と、再同期（DY-15）の補助は、最初のメジャーに含めない（2026-10-06 オーナー決定、IP 10）。公開 API に変更フィードの関数はない。
 
 ---
 
 ## 5. 適合テストデータの実行器
 
-実行器は Go の試験として書く。配置は `conformance/` を読み取り専用で使う。置き場は9章のパッケージ構成の決定に従う（仮に `internal/conformance`）。
+実行器は Go の試験として書く。配置は `conformance/` を読み取り専用で使う。置き場は `internal/conformance` とする。
 
 ### 5.1 データの読み方
 
@@ -567,7 +590,7 @@ type record struct {
   - `precision_policy = native-time-type` の成功ケースでは、入力を `time.Time` へ変換した値を期待値とする。`expect.value` は丸め前の参照値。変換した値と実際の値を報告する。
   - `representation.time_precision` がある場合、Go の `time.Time` はナノ秒型なので `nanoseconds` のケースを実行する。`milliseconds` は対象外とし、理由を記録する。
   - 印のないケースは全部実行する。
-  - `representation.signed_seq_nr = true` は、`SeqNr`（符号付き）で表せるので実行する。符号なしの型を選んだ場合は「表現不能」と報告する（9章）。
+  - `representation.signed_seq_nr = true` は、`SeqNr`（符号付き）で表せるので実行する。`SeqNr` は符号付き（9.3）なので「表現不能」にはならない。ほかに型で表せないケースがあれば、「表現不能」と理由を報告する（5.6）。
 - **値の表の操作**（公開 API の同名関数は要求されない。実行器が対応付ける）:
 
 | 操作 | 対応付け |
@@ -576,9 +599,8 @@ type record struct {
 | `validateSeqNr`（`context=value`） | `SeqNr.Validate`（T-9。0 は有効） |
 | `validateSeqNr`（`context=event`） | `NewEventEnvelope` を呼ぶ。0 は W-6 の契約違反。実行器で同じ式を計算しない |
 | `validateOccurredAt` | 型名 `ConformanceTime`・値がケース ID の集約を使う。1番から `event_seq_nr - 1` 番までを時刻 `1970-01-01T00:00:00.123000000Z` で `PersistEvent` する。次に入力時刻の `event_seq_nr` 番を書く。payload は空オブジェクト、manifest は空文字列。成功ケースは1番を読み戻して比較する。範囲外ケースは7番で契約違反を比較する（T-13） |
-| `fnv1a64` | 共有のハッシュ実装は DynamoDB・メモリのどちらにもない。DynamoDB はこのハッシュを保存キーに使わない。理由を「対象外」として記録する |
+| `fnv1a64` | 最初のメジャーにはハッシュを使う保存先がない（メモリ・DynamoDB とも aid 文字列そのものをキーにする）。適合データの FNV-1a 64 の4件（K-1）は、理由を付けて「対象外」と報告し、成功にも失敗にも数えない。ハッシュを使う保存先を出す段階 5 で実行する（実装計画 5章の受け入れ条件1。2026-10-06 オーナー決定） |
 
-- 「共有のハッシュ実装」を、Go の実装が持たない場合の扱いは10章に書く。
 - **payload と集約状態の比較**: 既定の JSON シリアライザで直列化・復元した JSON 値を比較する。キー順と空白は無視する。配列の順序・null・真偽値・文字列・数値は保つ。真偽値と数値を同一視しない。Unicode の正規化はしない。
 - **generators**: `target`（ケースを根とする JSON Pointer）・`character`（Unicode 1文字）・`byte_length`（UTF-8 の総バイト数）。fixtures 内の空文字列が対象。`~0` と `~1` を復号する。Schema 検査は展開前、操作は展開後の値で行う。400KB は 409600 バイト、1MB は 1048576 バイト。
 
@@ -586,9 +608,9 @@ type record struct {
 
 1. `backends` に、実行する保存先（`memory` か `dynamodb`）があるか確認する。なければ「対象外」と報告する。`requires=["ttl"]` は TTL 方式を要求する。v1 の TTL 場面は DynamoDB だけ（MEM-12）。
 2. 各場面を独立したストアで実行する。メモリは毎回 `memory.NewStore` で空の `Store` を作る。DynamoDB は、場面ごとに一意なテーブル名と GSI 名を実行器が割り当てて、3テーブルを同じリージョンに作る。他のケースの項目を使い回さない。
-3. `seed.items` があれば、ストア生成前に試験用の権限で入れる。
-4. `store` の設定でストアを生成する。`retention_count=null` は履歴なし。`retention_mode` は delete か ttl。`ttl_grace_seconds` は猶予秒。共通名を `Config`・`Option` へ対応付ける。生成前の障害を先に登録する。
-5. `initialization` があれば、生成結果を検査する。生成失敗のケースは操作列がない。
+3. `seed.items` があれば、ストア生成前に、試験用の権限（障害を差し込まない別のクライアント。4.4）で入れる。ライブラリ用のクライアントでは入れない。
+4. `store` の設定でストアを生成する。`retention_count=null` は `NoRetention()`（履歴なし）。`retention_mode` は delete か ttl。`ttl_grace_seconds` は `WithTTLGraceSeconds` の猶予秒。共通名を `Config`・`Option` へ対応付ける。生成前の障害を先に登録する。オプションの構築（`KeepLatest(0)` など）の失敗も、生成の失敗として扱い、手順5で比べる。
+5. `initialization` があれば、生成結果を検査する。`initialization.expect.error` は、オプションの構築の失敗と、`New`・`NewStore` の失敗の、どちらでも観測する。生成失敗のケースは操作列がない（例: `core-retention-zero`）。
 6. generators を展開し、`fixtures.events`・`fixtures.snapshots` を、各操作の直前に封筒として構築する。無効な入力のために封筒の構築が失敗したら、その操作の失敗として捕捉する。実行器の事前検査で、ライブラリの検査を代替しない。
 7. `steps` を配列順に、並行実行せずに実行する。
 8. 各操作の `expect` と `observe` を検査する。`expect` は `success`・`none`・`snapshot`（`head_seq_nr` と封筒の組）・`events`（順序込み）・`error`。保持の失敗や遅延がある場面は、保持・検査フックの完了後に観測する。フックが書き込みの成功・失敗を変えてはならない。
@@ -599,21 +621,25 @@ type record struct {
 
 | フック | 置き場所 | 内容 |
 |---|---|---|
-| 保持の決定的実行（delete / ttl） | 試験側の保持トリガー。ライブラリ内部に「保持処理を同期で実行して完了を待つ」入口を置き、内部パッケージ（`internal/...`）から試験が呼ぶ案。**公開 API は増やさない**（置き方は10章の9） | 保持処理の完了後に観測する |
-| 内部履歴（`observe.history`） | DynamoDB: snapshot テーブルを Query して `active`（印なし）と `marked`（`ttl` あり）に分ける。メモリ: `Store` の内部の論理履歴を試験用の内部パッケージから読む | その集約の履歴だけ。`active` と `marked` を完全一致。`absent` は存在してはならない履歴。現在のスナップショットと設定項目は数えない |
+| 保持の決定的実行（delete / ttl） | トリガーは置かない。保持処理は書き込みの呼び出しの中で、確定の後に同期で行う（メモリは同じロックの中。MEM-10。DynamoDB は確定の応答の後で戻る前。D-9）。失敗しても書き込みの結果は変えない。**公開 API は増やさない** | 操作が返った後に観測する |
+| 内部履歴（`observe.history`） | DynamoDB: snapshot テーブルを Query して `active`（印なし）と `marked`（`ttl` あり）に分ける。メモリ: `Store` の内部の論理履歴を `internal/testhook` 経由で読む | その集約の履歴だけ。`active` と `marked` を完全一致。`absent` は存在してはならない履歴。現在のスナップショットと設定項目は数えない |
+| メモリの保持の失敗（再試行と通知） | 論理履歴のフック（候補選択と削除）が `storage-error` を返す。通知は `WithRetentionFailureHandler` の捕捉関数と、差し替えた `slog` のハンドラーで捕捉する。再試行は、次の追記の後に `observe.history` で、取り残しが片付いたことを確かめる | MEM-10・MEM-11。書き込みの結果は変えない |
 | 失敗通知（`observe.notifications`） | `WithRetentionFailureHandler` に試験用の捕捉関数を渡す。メモリの必須のログは、`slog` のハンドラー差し替えでも捕捉できる | 分類 `retention-failure`。空配列は失敗通知なし。同じ最終失敗のログが複数あれば1つに正規化してよい |
 | SDK 要求（`observe.requests`） | `APIOptions` のミドルウェアで、送信前の入力を記録する | 式と属性名・値の束縛を解析した構造で比較する（空白・節の順序・AND の順序は比較しない）。`update.set`・`update.remove`・`condition`、`key_condition.all`（`eq`/`gte` と `aggregate_id`・`seq_nr` への束縛）、TTL の `#ttl` と `expression_attribute_names`、`expires`（エポック秒）、`initial_batch_sizes`（再送を除く削除バッチ件数）、`no_requests_in_phases`・`request_count`・`minimum_request_count`。`requests` の要素は、実際の別々の要求に配列順で対応付ける。ページ送り・未処理キーの再要求・削除バッチ分割は、段階の要求列全体で検査する |
 | 属性（`observe.items`・`seed.items`） | 実行器が `GetItem` で物理項目を読む | `table` は journal / snapshot / head の設定済みテーブル名。`attributes` は S/N/B/L/M で、属性集合を完全一致。N は10進文字列を整数として比較。L の中の M は `nested_attributes`。`binary_json` は B の復元結果を JSON で比較。`bindings` の `generated-store-id` は、最初の実際の `store_id` を束縛し、3項目で同じ値であることを検査する。属性集合・型・リスト件数の検査は、除外前の実際の項目全体で行う |
-| 時計（`clock.epoch_seconds`・操作の `clock_epoch_seconds`） | 内部の時計の差し替え（保持処理に渡す `func() time.Time`）。公開 API では `WithClock` のような引数を増やさない案とし、内部パッケージから注入する | 期限は「印付け時刻 + `ttl_grace_seconds`」。v1 は 2100年の時計 |
+| 時計（`clock.epoch_seconds`・操作の `clock_epoch_seconds`） | 内部の時計の差し替え（保持処理に渡す `func() time.Time`）と、待ち時間の差し替え。公開 API では `WithClock` のような引数を増やさず、`internal/testhook` から注入する | 期限は「印付け時刻 + `ttl_grace_seconds`」。v1 は 2100年の時計 |
 | 配置照合（`dynamodb/layout.json`） | 実際の3テーブルを `DescribeTable` と `DescribeTimeToLive` で照合する | テーブル名と GSI 名は、設定値へ束縛する |
 
-- 公開 API を増やさずに内部パッケージへ試験用のフックを置く方法は、設計の細部である。ライブラリ本体からの依存方向は、公開パッケージ → 内部パッケージの一方向にする。
+- 試験用のフック（時計・待ち時間、メモリの論理履歴の障害と観測）の型と登録関数は、公開パッケージに依存しない `internal/testhook` に置く。型は aid の文字列・seq_nr・バイト列だけを使い、中核の型に依存しない。
+- `memory` と `dynamodb` は `internal/testhook` を import して、非公開のフィールドで受ける。実行器（`internal/conformance`）は `internal/testhook` を通してストアに登録する。依存の向きは「公開パッケージ → `internal/testhook`」と「実行器 → 公開パッケージと `internal/testhook`」で、循環しない。公開 API は増やさない。
 
 ### 5.4 障害の差し込み
 
-`faults` の `operation` は、0 がストア生成、1以上が1始まりの操作番号。登録した障害が発火しなければ場面は失敗とする。差し込めない場合は「未検証」と報告し、成功に集計しない。
+`faults` の `operation` は、0 がストア生成、1以上が1始まりの操作番号。差し込めない場合は「未検証」と報告し、成功に集計しない。
 
-`phase` は、`conformance/schema/common.schema.json` の列挙どおり12種類（付録の列挙も12種類）。10章に、「13」との食い違いを書く。
+**発火の数え方**: 登録した障害ごとに、実行器が発火の数を持つ。フックやミドルウェアが障害を適用するたびに1増やす。場面の終わりに、`repeat` が `count` の場合は指定した回数ちょうど、`until-operation-finishes` の場合は1回以上であることを確かめる。合わなければ、どの障害かを示して場面を失敗にする。
+
+`phase` は、`conformance/schema/common.schema.json` の列挙どおり12種類。
 
 | phase | DynamoDB の差し込み | メモリの差し込み |
 |---|---|---|
@@ -623,12 +649,14 @@ type record struct {
 | `deserialize-snapshot` | 同じ | 同じ |
 | `commit` | `TransactWriteItems` の入力を `APIOptions` で捕らえ、`replace-request`（何も確定しない）か `replace-response`（確定済みで応答を差し替える）。`TransactionCanceledException` は `replace-request` | 確定前（まとめて公開する前）に、論理履歴のフックが失敗を返す。ヘッド・ジャーナル・スナップショットに変更を残さない（MEM-7） |
 | `read-events` | journal の `Query` を差し替える | ロックの中のイベント取得のフックが失敗を返す |
-| `read-snapshot` | `BatchGetItem` を差し替える。`sdk-response` は `unprocessed_keys` を返す。`read-interleave` は 5.5 | ロックの中の「ヘッドとスナップショットの組」の取得のフックが失敗を返す |
-| `retention-query` | 履歴 GSI の `Query` を差し替える。`history_pages`・`omit_just_written_history` は応答計画に従う | 論理履歴の候補選択のフックが失敗を返す |
+| `read-snapshot` | `BatchGetItem` を差し替える。`sdk-response` は `unprocessed_keys` を返す。`read-interleave` は 5.5（DynamoDB だけ） | ロックの中の「ヘッドとスナップショットの組」の取得のフックが失敗を返す |
+| `retention-query` | 履歴 GSI の `Query` を差し替える。`history_pages`・`omit_just_written_history` は応答計画に従う | 論理履歴の候補選択のフックへ対応付ける（`conformance/README.md`）。`storage-error` は失敗を返す。`sdk-response` の `history_pages` は、保持処理が読んだ印のない履歴の seq_nr の列（降順）のページ列として、そのまま返す。今書いた履歴を自動で足さない。今書いた履歴を足すことと重複を除くことは、ライブラリが DynamoDB と同じ手順で行う。`omit_just_written_history=true` は、実行器がページ列に今書いた番号がないことを確かめる（メモリの実データには出てこない）。削除の物理的な結果は、実際の論理履歴に反映して検査する |
 | `retention-delete` | `BatchWriteItem` を差し替える。`unprocessed_first_n` は先頭 n 件を `UnprocessedItems` にして、残りは実処理する | 論理履歴の削除前のフックが失敗を返す |
-| `retention-mark` | `UpdateItem` を差し替える | メモリは TTL 方式を提供しない（MEM-12）。差し込む対象がない。代わりに、TTL 方式の要求が設定エラーになることを確かめる。「対象外」として理由を記録する |
-| `configuration-read` | 設定照合の `BatchGetItem` を差し替える。`unprocessed_keys` を含む | メモリの設定は `Store` が不変で持つ。読み取りの経路がない。代わりに、同じ `Store` を共有した `New` が同じ設定を見ることを確かめる（MEM-2・MEM-3）。「対象外」として記録する |
-| `configuration-create` | 設定作成の `TransactWriteItems` を差し替える。`install_items` がある生成競合は、実行器が別に先に書いた項目を確定させる | 生成時の設定検査で確かめる（MEM-3）。「対象外」として記録する |
+| `retention-mark` | `UpdateItem` を差し替える | メモリの場面にこの段階はない（実データで確認。DynamoDB だけ。MEM-12） |
+| `configuration-read` | 設定照合の `BatchGetItem` を差し替える。`unprocessed_keys` を含む | メモリの場面にこの段階はない（実データで確認。DynamoDB だけ） |
+| `configuration-create` | 設定作成の `TransactWriteItems` を差し替える。`install_items` がある生成競合は、実行器が別に先に書いた項目を確定させる | メモリの場面にこの段階はない（実データで確認。DynamoDB だけ） |
+
+メモリの場面にある障害は、`commit`・`read-*`（`read-events`・`read-snapshot`）・`serialize-*`・`deserialize-*`・`retention-query`・`retention-delete` だけである。`read-interleave`・`configuration-read`・`configuration-create`・`retention-mark` は DynamoDB だけである。
 
 - `kind` と注入の方式:
   - `serialization-error`: シリアライザの該当する段階を失敗させる。
@@ -650,15 +678,16 @@ type record struct {
 4. 応答の中のヘッドを、手順1で捕捉した旧ヘッドへ差し替える。
 5. 呼び出し側が受け取る `SnapshotRead` を `expect` と比べる。
 
-メモリは、R-8 と MEM-8 により、この状態が起きない（原子的に読む）。メモリでは、この場面は `backends` に含まれるかを確認し、含まれれば MEM-8 に基づく別の期待値で実行する。含まれなければ「対象外」。
+`read-interleave` は、実データでは DynamoDB の場面（`dynamodb/read.json`）だけにある。メモリでは実行しない（`backends` にない）。メモリは MEM-8 で原子的に読むので、この状態が起きない（R-8）。
 
 ### 5.6 報告の形と CI での実行
 
-- CI へ次を出す: データの版と `manifest` の照合結果、言語・実装版・保存先、ケース ID と規則番号ごとの成功・失敗・対象外・未検証、失敗した操作番号と期待値・実際の値。1ケースが複数の規則を持つときは、全規則へ対応付ける。途中で期待と異なったら、成功と報告しない（IP 5）。
+- 報告の状態は「成功・失敗・対象外・未検証・表現不能」の5つ。
+- CI へ次を出す: データの版と `manifest` の照合結果、言語・実装版・保存先、ケース ID と規則番号ごとの上の5状態、失敗した操作番号と期待値・実際の値。1ケースが複数の規則を持つときは、全規則へ対応付ける。途中で期待と異なったら、成功と報告しない（IP 5）。
 - 表現能力の違いによる選択・任意の能力・削除済み規則・呼び出し側の推奨は、理由を記録する。条件を満たさないケース・必須ケースを飛ばした結果・障害を差し込めなかった結果を、成功に集計しない。
-- 出力は、Go の `testing` の標準出力（`go test -json`）と、集計用の JSON ファイルの両方に出す案とする。JSON ファイルの名前と形は、実装時に決める（規範にない）。
+- 集計の正本は JSON ファイル1つ（`conformance-report.json`。CI の成果物として保存する）とする。中身は、データの版、`manifest` の照合結果、言語・実装版・保存先、ケースごとの `id`・`rules`・`status`・理由・失敗した操作番号・期待値・実際の値、規則番号ごとの状態別の件数。`go test -json` の出力はログとして残すだけにする。
 - 配布の検証: `conformance/` を同一内容で写し、`.gitattributes` で改行変換を止める。CI は `python3 tools/conformance/manifest.py verify` と、`manifest.json` の SHA-256 の照合を行う（現行の `.github/workflows/ci.yml` の `lint` ジョブに既にある）。manifest を作り直して差分を隠さない。
-- 適合の実行は、既存の `test` ジョブとは別のジョブとして足す案とする（DynamoDB Local のコンテナが要る）。必須の検査にするかは、`ci-success` の `needs` に含めるかで決まる。7章で扱う。
+- 適合の実行は、既存の `test` ジョブとは別のジョブ `conformance` として足す（DynamoDB Local のコンテナが要る）。`ci-success` の `needs` に加える。必須の範囲の決め方は7.4。
 
 ---
 
@@ -677,23 +706,32 @@ amazon/dynamodb-local@sha256:ff89bd48ff32cd8d9be5fee8873b65b8854dc408f1afe881be6
 ```sh
 docker run --rm -p 8000:8000 \
   amazon/dynamodb-local@sha256:ff89bd48ff32cd8d9be5fee8873b65b8854dc408f1afe881be6eb00247bc0dab \
-  -jar DynamoDBLocal.jar -inMemory -sharedDb
+  -jar DynamoDBLocal.jar -inMemory -sharedDb -disableTelemetry
 ```
 
+- リージョンは `us-east-1`、資格情報はダミーにする。DynamoDB 用と Streams 用の両方のクライアントに endpoint を明示する。根拠は、ハブの `tools/spikes/dynamodb-emulators/` の記録（`README.md`・`probe.py`）。
 - Go の試験からは、`testcontainers-go` の汎用コンテナで同じ digest を使う案。現行の `go.mod` にすでに `testcontainers-go v0.44.0` がある。LocalStack のモジュールは不要になるので、移行後に外す。
 - SDK のクライアントには、`BaseEndpoint` を明示する。Streams のクライアントにも endpoint を明示する。
 - Streams の ARN のリージョンは `ddblocal` になる。ARN からリージョンを推測しない。
-- DynamoDB Local の起動オプション（`-inMemory`・`-sharedDb` など）は、スパイク（ハブの `tools/spikes/dynamodb-emulators/`）の記録と合わせて確認する。この文書では、上の例を暫定とする（未確認）。
 
 ### 6.2 今の試験（LocalStack）からの移し方
 
 現行の試験は `localstack/localstack:2.1.0` を使う（`test/event_store_on_dynamodb_test.go`・`test/event_store_on_dynamodb_regression_test.go`・`test/user_account_repository_test.go`）。テーブル作成の補助は `pkg/common/dynamodb.go`（`CreateJournalTable`・`CreateSnapshotTable`・`CreateDynamoDBClient`）にある。
 
-1. 実行器と、DynamoDB Local の起動の補助を、新しい試験用の内部パッケージに作る（PR 2）。
-2. 3テーブルの作成の補助を、新しい配置（3テーブル・GSI・Streams・TTL）で書き直す。`pkg/common` の補助は、この時点で試験の側へ移し、公開 API から外す（IP 4.2）。
-3. 現行の LocalStack の試験は、新しい API への移行（PR 3 以降）で書き換える。書き換えた時点で LocalStack を外す。
-4. 現行の回帰試験（全件読み取り・新しい履歴の保持）の意図を、新しい API の試験にも引き継ぐ。
-5. 旧 API を使う試験は、旧 API を削除する PR（7章の最後）で一緒に消す。
+1. `pkg/common` と LocalStack の旧い試験は、旧 API を削除する PR（7.2 の13番）まで、そのまま動かす。
+2. 新しい試験基盤（DynamoDB Local の起動と、3テーブル・GSI・Streams・TTL の作成の補助）は、`internal/` に新しく作る（7.2 の4番）。
+3. 現行の回帰試験（全件読み取り・新しい履歴の保持）の意図は、新しい API の書き込み・読み取り・保持の PR（7.2 の10・11番）で引き継ぐ。
+4. 旧 API の削除の PR（7.2 の13番）で、旧い試験・`pkg/common`・LocalStack のモジュールを外す（IP 4.2）。
+
+### 6.3 メモリ固有の試験
+
+適合データに加えて、メモリ実装に次の試験を足す（7.2 の8番）。
+
+- MEM-2: 別々の `NewStore` は独立している。同じ `*Store` を渡した `New` だけが記録・設定・排他制御を共有する。
+- MEM-4: 同じ seq_nr を複数の goroutine から並行に追記すると、成功は1件だけで、ほかは楽観ロックになる。
+- MEM-4: 読み取りと追記が重なっても、確定前の途中の状態を読まない。
+- MEM-6: 入力の値と取得結果を変更しても、保存した値が変わらない。
+- CI で、メモリのパッケージと適合の実行器を `go test -race` で動かす。現行の `make test` は `-race` を付けていないので、`conformance` ジョブ（5.6）か、メモリ用の別の手順で付ける。
 
 ---
 
@@ -701,45 +739,55 @@ docker run --rm -p 8000:8000 \
 
 ### 7.1 方針
 
-- 各 PR を main へ squash マージする（IP 3）。main の Snapshot は、次のメジャーの版で公開する。
+- 各 PR を main へ squash マージする（IP 3）。次のメジャーの開発版は、モジュールのパスを `/v2` にした main を、疑似バージョンで取得する形で提供する（1.4）。
 - worker は PR の作成までを行う。マージはコーディネーターが行う（IP 9）。
 - 1つの PR が、1つの規則群に対応する（IP 4.2）。
-- 最初の PR は、次のメジャー版の下準備（版の番号の変更など）とする。
+- 最初の PR は、次のメジャー版の下準備（モジュールのパスの変更）とする。
 
 ### 7.2 PR の列
 
 | 順 | 範囲 | 対応する規則群 | 備考 |
 |---|---|---|---|
-| 1 | 下準備。`go.mod` のパスを `/v2` に変える。全 import を追従する。`version` を次のメジャーの開発版に合わせる。 | IP 3・IP 4.2 | 既存の実装は動かしたまま。CI は現行のまま通る |
-| 2 | 実行器・報告・DynamoDB Local の試験基盤・`pkg/common` の移動 | CR・IP 5・IP 4.1 | 接続していない保存先は「未検証」。成功と報告しない |
-| 3 | 中核: 封筒・検査・シリアライザ・5分類のエラー・`context.Context` の API（インターフェイスと値の型） | T-1〜T-13・E-1〜E-3・H・W・R | 旧実装と別の経路で併存する |
-| 4 | メモリ実装と、共通ケースの接続 | MEM-1〜MEM-13 | 対象ケースを必須の CI にする |
-| 5 | DynamoDB: 3テーブル・配置・設定照合 | DY-2・DY-3・DY-8・DY-16〜DY-19・D-1〜D-4 | `layout.json` と `item-shapes.json` に一致 |
-| 6 | DynamoDB: 書き込み・読み取り | D-5〜D-7・W・R・DY-9〜DY-11 | 障害・要求・属性の検査を足す |
-| 7 | DynamoDB: 保持処理 | S-1〜S-4・D-9・P-18・P-24 | TTL の場面を含める。障害と要求の検査を必須にする |
-| 8 | 文書（README・DATABASE_SCHEMA・MIGRATION_GUIDE・移行の案内）、利用例の移行、旧 API の削除 | IP 5-5・IP 5-6・IP-D8 | 旧 API を使う箇所を、すべて移行してから削除する |
+| 1 | 下準備。`go.mod` のパスを `/v2` に変え、全 import を追従する。`version` は変えない（1.4） | IP 3・IP 4.2 | 既存の実装は動かしたまま。CI は現行のまま通る |
+| 2 | 実行器1: データの読み込み、`manifest` の照合、値の表、報告、必須の一覧ファイル、CI のジョブ `conformance` | CR・IP 5 | 接続していない保存先は「未検証」。成功と報告しない。7.4 の仕組みで CI は落ちない |
+| 3 | 実行器2: 場面の実行器、障害とフックの枠組み（`internal/testhook`）、発火の数え方 | CR | フックは型と登録の口だけを定義する。型は aid の文字列・seq_nr・バイト列だけを使い、中核の型に依存しない |
+| 4 | DynamoDB Local の基盤と観測（コンテナ、3テーブルの作成、SDK 要求の記録、項目の読み取り） | IP 4.1 | `internal/` に新しく作る。旧い試験と `pkg/common` はそのまま動かす（6.2） |
+| 5 | 中核1: エラーの分類と値の型の検査（`SeqNr`・`AggregateID`・`Kind`） | T-1・T-9・T-11〜T-13・E-1〜E-3 | 旧実装と別のパッケージで併存する |
+| 6 | 中核2: 封筒とシリアライザ | T-2〜T-8・T-10 | |
+| 7 | 中核3: 操作のインターフェイス・`SnapshotRead`・`Option` | W・R・S-1 | |
+| 8 | メモリと共通の場面の接続、`go test -race`、メモリ固有の試験（6.3） | MEM-1〜MEM-13 | 対象ケースを必須の一覧に加える。フックを呼ぶ場所（論理履歴の候補選択・削除・確定前・読み取り）を実装する。依存の向きは「メモリ → `internal/testhook` ← 実行器」 |
+| 9 | DynamoDB: 3テーブル・配置の照合（`layout.json`）・設定照合 | DY-2・DY-3・DY-8・DY-16〜DY-19・D-1〜D-4 | `layout.json` と `item-shapes.json` に一致 |
+| 10 | DynamoDB: 書き込み・読み取り | D-5〜D-7・DY-9〜DY-11 | 障害・要求・属性の検査を足す。旧い回帰試験の意図を引き継ぐ（6.2） |
+| 11 | DynamoDB: 保持処理 | S-1〜S-4・D-9・P-18・P-24 | TTL の場面を含める。障害と要求の検査を必須にする |
+| 12 | 文書（README・DATABASE_SCHEMA・MIGRATION_GUIDE・移行の案内）と利用例の移行 | IP 5-5・IP 5-6・IP-D8 | 実サービス向けの IAM の例もここで書く（4.4） |
+| 13 | 旧 API の削除（旧い試験・`pkg/common`・LocalStack のモジュールを含む） | — | 旧 API を使う箇所を、すべて移行してから削除する |
 
-変更フィードの補助（9章）を含める場合は、PR 6 と PR 7 の間か、PR 8 の前に1本足す。位置は9章の決定後に決める。
+- 変更フィードの補助は、最初のメジャーに含めない（1.3）ので、PR の列に入れない。
+- 配置の照合（`layout.json`）は、9番の PR に入れる。
 
 ### 7.3 旧 API との共存と削除の時点
 
-- PR 1 から PR 7 の間は、旧 API（`pkg`）と新 API が一時的に併存する。併存は、main の CI を通し続けるための移行作業用で、利用者への互換の約束ではない。
-- 新 API は、旧 `pkg` のパッケージとは別のパッケージに置く（9章のパッケージ構成の結果による）。旧と新で同じ名前の型を衝突させない。
-- 旧 API の削除は PR 8。旧 API の利用箇所（`test/`・利用例）をすべて移行してから消す。正式な `v2.0.0` に、旧形式の fallback・alias・変換は残さない。
+- 1番から12番の間は、旧 API（`pkg`）と新 API が一時的に併存する。併存は、main の CI を通し続けるための移行作業用で、利用者への互換の約束ではない。
+- 新 API は、旧 `pkg` のパッケージとは別のパッケージに置く。モジュールのルートの `eventstore` と、旧 `/v2/pkg` は別のパッケージなので、旧と新で同じ名前の型を衝突させない（9.1）。
+- 旧 API の削除は13番。旧 API の利用箇所（`test/`・利用例）をすべて移行してから消す。正式な `v2.0.0` に、旧形式の fallback・alias・変換は残さない。
 - 正式リリースは、受入条件（IP 5）の達成と、オーナーの承認の後に行う。`release.yml` は手動起動のみで、この制御を維持する。
 
 ### 7.4 各 PR で main の CI を通し続ける方法
 
 - 既存の `lint`（manifest 照合と `make vet`）・`test`（`make test`）・`release-checks` を維持する。
-- 適合の実行は、保存先ごとに接続した規則群だけを必須にする。接続済みの規則群を、後続の PR で必須から外さない。
-- 新しい CI のジョブは、PR 2 で追加する。`ci-success` の `needs` へ加える。
-- Docker が要る試験は、`test` と別のジョブに分ける案とする（所要時間の上限は現行の `test` が10分）。
+- 必須の一覧ファイル `internal/conformance/required.json` を置く。保存先ごとにケース ID を列挙し、2番の PR では空にする。全ケースが「未検証」でも、一覧が空なので CI は落ちない。
+- CI のジョブ `conformance` を `ci-success` の `needs` に加える（2番の PR）。ジョブが失敗するのは、次の場合だけにする。
+  - データか `manifest` が合わない。
+  - 一覧にあるケースが「失敗」か「未検証」になる、または登録した障害が発火しない（5.4）。
+  - 実行器自体のエラー。
+- 一覧にないケースは報告するだけで、CI を落とさない。以後の PR は、接続した規則群のケースを一覧に足す。一覧から外すときは、コーディネーターのレビューを経る。
+- Docker が要る試験は、`test` と別のジョブ `conformance` に分ける（所要時間の上限は現行の `test` が10分）。
 
 ---
 
 ## 8. 移行の案内
 
-現行メジャー（v1.x）の利用者向けの案内を、PR 8 で `docs/MIGRATION_GUIDE.md`・`docs/MIGRATION_GUIDE.ja.md` に書く。この文書では内容を決める。
+現行メジャー（v1.x）の利用者向けの案内を、12番の PR で `docs/MIGRATION_GUIDE.md`・`docs/MIGRATION_GUIDE.ja.md` に書く。この文書では内容を決める。
 
 ### 8.1 コードの移行
 
@@ -768,87 +816,82 @@ docker run --rm -p 8000:8000 \
 
 ## 9. 判断が要る点
 
-この章の項目は、どれも**決めていない**。オーナーが決める。推奨は提案である。
+この章の項目は、2026-10-06 に決めた。決めた人と理由を残す。選択肢の表は、理由の補足として残す。
 
 ### 9.1 パッケージ名と構成（`pkg` と `/v2`）
 
-現行は、1つのパッケージ `pkg` に、全部がある。モジュールのパスを `/v2` にするのに合わせて、どう構成するか。
+**決定**: B。モジュールのルート（`eventstore`）に封筒・エラー・操作の型を置き、保存先ごとに `memory` と `dynamodb` のパッケージに分ける。試験の補助は `internal/` に置く。
+**決めた人**: オーナー（2026-10-06）。
+**理由**: 依存方向が明確（保存先 → 中核）で、メモリだけを使う利用者に AWS SDK の import が増えない。名前が内容を表す。旧 `pkg` とは別のパッケージになるので、併存期間（7.3）に型名が衝突しない。
 
 | 選択肢 | 内容 | 利点 | 欠点 |
 |---|---|---|---|
-| A. `pkg` を続ける | `github.com/j5ik2o/event-store-adapter-go/v2/pkg` | import の変更が `/v2` だけで済む。変更が最小 | `pkg` は内容を表さない名前。保存先を足すたびに1つのパッケージが大きくなる。メモリと DynamoDB が同じパッケージに混ざり、依存（AWS SDK）を使わない利用者にも AWS SDK が入る |
-| B. ルートに中核、保存先を別のパッケージにする | ルート `eventstore`（中核）、`memory`、`dynamodb`。試験の補助は `internal/` | 依存方向が明確（保存先 → 中核）。メモリだけを使う利用者に AWS SDK の import が増えない。名前が内容を表す | import の変更が増える。旧 `pkg` との併存期間に、型名の衝突を避ける設計がいる |
-| C. 中核を専用の `core`（または `eventstore`）パッケージに置き、ルートは空 | `/v2/core`、`/v2/memory`、`/v2/dynamodb` | B と同じ利点。ルートの名前の衝突がない | ルートに型がなく、発見しにくい。パスが深くなる |
+| A. `pkg` を続ける | `github.com/j5ik2o/event-store-adapter-go/v2/pkg` | import の変更が `/v2` だけで済む | `pkg` は内容を表さない名前。メモリと DynamoDB が同じパッケージに混ざり、AWS SDK を使わない利用者にも入る |
+| B. ルートに中核、保存先を別のパッケージにする（決定） | ルート `eventstore`（中核）、`memory`、`dynamodb` | 依存方向が明確。名前が内容を表す | import の変更が増える |
+| C. 中核を専用の `core` パッケージに置き、ルートは空 | `/v2/core`、`/v2/memory`、`/v2/dynamodb` | ルートの名前の衝突がない | ルートに型がなく、発見しにくい |
 
-- 推奨: B。理由は、依存方向を明確にでき、メモリだけの利用者が AWS SDK を引き込まないため。ただし、利用者の import の変更が増える。この文書の2章の宣言は B を仮定している。
-- 併存期間（7.3）は、A なら旧 `pkg` と新が同じパッケージになり名前が衝突する。B と C は別のパッケージにできる。
+### 9.2 欠番
 
-### 9.2 変更フィードの補助（IP 10）
-
-head テーブルの Streams のレコードからヘッド遷移を組み立てる関数と、再同期（DY-15）の補助を、最初のメジャーに含めるか。
-
-| 選択肢 | 内容 | 利点 | 欠点 |
-|---|---|---|---|
-| A. 両方を含める | 組み立て関数と、再同期の補助 | 利用者が DY-13・DY-15 を自分で書かなくてよい。規則に沿った実装が配られる | 最初のメジャーの範囲が広がる。Streams の SDK と試験（DynamoDB Local の Streams）の負担が増える。メモリは変更フィードを提供しない（MEM-13）ので、DynamoDB だけの API になる |
-| B. 組み立て関数だけを含める | DY-13 の関数だけ | 範囲が小さい。DY-13 の誤りを防げる | 再同期は利用者の責任になる（DY-15 は購読側の義務） |
-| C. 両方を延期する | 最初のメジャーに含めない | 範囲が最小。最初のメジャーを早く出せる | 利用者が自力で実装する。後から足すと API の追加になる |
-
-- 推奨: B。理由は、DY-13 の読み飛ばし（`__config__`）と INSERT/MODIFY の扱いは、ライブラリの配置の知識に依存して間違えやすく、小さい範囲で価値が出るため。再同期は購読側の義務で、システムごとの事情が大きい。
-- どの案でも、head の Streams を有効にする配置の要件（DY-3・DY-12）は維持する。
+変更フィードの補助は、最初のメジャーに含めないと決めた（2026-10-06 オーナー決定、IP 10）。選択肢の判断が不要になったので、この項目を欠番とする。他の項目の番号は変えない。本文の扱いは 1.3 と 4.8。
 
 ### 9.3 `SeqNr` を符号付きにするか
 
+**決定**: A の `int64`。
+**決めた人**: 指揮役（2026-10-06）。
+**理由**: 適合データの負数ケースと 2^53 のケースを実行でき、報告の「表現不能」が減る。範囲外は契約違反として返せる（T-9）。
+
 | 選択肢 | 内容 | 利点 | 欠点 |
 |---|---|---|---|
-| A. `int64` | 符号付き | 負数と 2^53 を型で表せる。範囲外を契約違反として返せる（T-9）。適合の負数ケースを実行できる | 負数が型として表せてしまうので、検査が必要 |
-| B. `uint64`（現行と同じ） | 符号なし | 現行と同じ型。負数を型が防ぐ（共通契約 1.5: 型で表せない検査は不要） | 負数のケースが「表現不能」になる。範囲外（2^53 以上）の検査は必要 |
-
-- 推奨: A。理由は、適合データの負数ケースを実行でき、報告の「表現不能」が減るため。
+| A. `int64`（決定） | 符号付き | 負数と 2^53 を型で表せる | 負数が型として表せてしまうので、検査が必要 |
+| B. `uint64`（現行と同じ） | 符号なし | 負数を型が防ぐ | 負数のケースが「表現不能」になる |
 
 ### 9.4 payload の型の表し方
 
+**決定**: A のジェネリクス `EventEnvelope[E]`。
+**決めた人**: 指揮役（2026-10-06）。T-6 はどちらも許す。
+**理由**: T-6 が payload に型の要件を課さず、`any` の制約で足りるうえ、型安全を得られる。複数の型は、利用者が1つの和型（インターフェイスと manifest による分岐）を作る。
+
 | 選択肢 | 内容 | 利点 | 欠点 |
 |---|---|---|---|
-| A. ジェネリクス `EventEnvelope[E]` | 型パラメーター | 型安全。取り出しの型変換が要らない | 型パラメーターが API 全体に広がる。1つのストアで複数のイベント型を扱うには、和型を自分で作る必要がある |
-| B. `any` | 実行時の型 | 1つのストアで複数の型を扱いやすい。型パラメーターが要らない | 型安全でない。取り出しに型アサーションが要る |
-
-- 推奨: A（2章の宣言の仮定）。理由は、T-6 が payload に型の要件を課さず、`any` の制約で足りるうえ、型安全を得られるため。複数の型は、利用者が1つの和型（インターフェイスと manifest による分岐）を作る。
+| A. ジェネリクス（決定） | 型パラメーター | 型安全。取り出しの型変換が要らない | 型パラメーターが API 全体に広がる |
+| B. `any` | 実行時の型 | 1つのストアで複数の型を扱いやすい | 型安全でない。型アサーションが要る |
 
 ### 9.5 `GetLatestSnapshotByID` の命名
 
-現行は `GetLatestSnapshotById`。Go の慣習は `ID`。
+**決定**: A の `ID`。
+**決めた人**: 指揮役（2026-10-06）。
+**理由**: Go の慣習に合う。メジャーの置き換えと同時に行えるので、移行が同時に必要でも追加の負担にならない。
 
 | 選択肢 | 利点 | 欠点 |
 |---|---|---|
-| A. `ID` にそろえる | Go の慣習に合う | 現行の名前から変わる（旧 API の置き換えなので移行は同時に必要） |
+| A. `ID` にそろえる（決定） | Go の慣習に合う | 現行の名前から変わる |
 | B. 現行の `Id` を保つ | 名前の変更がない | Go の慣習から外れる |
-
-- 推奨: A。メジャーの置き換えと同時に行えるため。
 
 ### 9.6 保持処理の通知経路
 
-規範は、通知用の公開 API を固定しない（S-4・MEM-11）。
-メモリは MEM-11・MEM-D7 でログ通知が合意済みである。この項目の対象は、ログに**加えて**コールバックを公開するか（メモリと DynamoDB）と、DynamoDB の既定の経路である。
+**決定**: A。ログ（`log/slog`）を必須とし、コールバック（`WithRetentionFailureHandler`）を追加の経路として公開する。メモリと DynamoDB の両方。
+**決めた人**: 指揮役（2026-10-06）。S-4・MEM-11・MEM-D7 に沿う。
+**理由**: 適合の検査（`observe.notifications`）と利用者の監視が確実に受けられ、メモリの必須のログも保たれる。
 
 | 選択肢 | 内容 | 利点 | 欠点 |
 |---|---|---|---|
-| A. ログ（必須）に加えてコールバックを公開 | 2.9 の案 | 利用者が結果を自分の仕組みに接続できる。ログは常に出る | オプションが1つ増える |
-| B. `slog` のログだけ | 公開 API を増やさない | 最小 | 利用者が通知を捕捉しにくい。適合の `observe.notifications` を試験で捕捉するには、ログのハンドラーを差し替える必要がある |
-
-- 推奨: A。理由は、適合の検査と利用者の監視が確実に受けられ、メモリの必須のログも保たれるため。
+| A. ログ（必須）に加えてコールバックを公開（決定） | 2.9 | 利用者が結果を自分の仕組みに接続できる。ログは常に出る | オプションが1つ増える |
+| B. `slog` のログだけ | 公開 API を増やさない | 最小 | 試験で捕捉するには、ログのハンドラーを差し替える必要がある |
 
 ---
 
 ## 10. 未解決の疑問
 
-仕様を勝手に解釈して埋めない。次の点は、レビューと仕様の持ち主の確認が要る。
+現時点で未解決の疑問はない。旧1〜9は、指揮役のレビュー（1回目）と2026-10-06の決定で本文に反映した。
 
-1. **障害の段階の数**: 指示書は「13段階」と書く。付録の列挙と `conformance/schema/common.schema.json` の `faults[].phase` の列挙は、どちらも12種類（`serialize-event`・`serialize-snapshot`・`deserialize-event`・`deserialize-snapshot`・`commit`・`read-events`・`read-snapshot`・`retention-query`・`retention-delete`・`retention-mark`・`configuration-read`・`configuration-create`）。13番目が何かは未確認。この文書は12種類を設計した。13番目が分かったら、5.4 の表へ足す。
-2. **`fnv1a64` の対応付け**: 付録は、ハッシュを使うプロファイルの共有ハッシュ実装へ対応付けるとする。DynamoDB とメモリはハッシュを保存キーに使わない。この Go の実装に、対応付ける先がない場合、そのケースを「対象外」と報告してよいか、実行器が自前で計算して照合してよいか、規範から読み取れない。5.1 は「対象外として理由を記録」と書いたが、これは暫定。
-3. **保持件数「なし」と `retention_mode`**: 保持件数が「なし」のとき `retention_mode` を指定した場合に、設定エラーか無視かが、規範から読み取れない。
-4. **設定照合の再要求回数の上限の既定値**: `retry_limit` は適合データにあるが、利用者の既定値と、指数バックオフの間隔は規範にない。
-5. **メモリでの `read-interleave` と `configuration-*` の扱い**: 付録は、メモリは保持の障害を論理履歴のフックへ対応付けるとだけ書く。設定読み取りや生成競合の段階が、メモリの場面（`backends`）に含まれるかは、データを全件読んで確かめていない（未確認）。実装時に `backends` を確認し、含まれる場合の期待値は仕様の持ち主に確かめる。
-6. **`T-5` の「要素の追加が壊さない」と Go の構造体リテラル**: 非公開フィールドとコンストラクタで満たす案を2章に書いた。Go では、利用者が `EventEnvelope[E]{}` のゼロ値を作れる。ゼロ値の封筒を受け取ったときの扱い（契約違反として返すか）は、規範にない。
-7. **D-7 の見積もりの方式**: 規範は「項目サイズ超過を書き込み前に見積もる」とする。属性名・値・ヘッドの L/M の分を足す案を4.5に書いたが、DynamoDB が数えるサイズとの差で、境界のケースが食い違うかは、DynamoDB Local での確認が要る（未確認）。
-8. **DynamoDB Local の起動オプション**: 6.1 の `-inMemory -sharedDb` が、3テーブルと Streams と TTL の試験に足りるかは、この文書では確認していない（未確認）。ハブの `tools/spikes/dynamodb-emulators/` の記録で確かめる。
-9. **試験用フックの置き場所**: 5.3 の「保持処理の同期実行」と「時計の注入」を、公開 API を増やさずに内部パッケージから行う方法は、設計の細部が未確定。保持処理の呼び出しの構造（同期か、goroutine か）は、MEM-11 と D-9 の「確定後」を満たす範囲で、実装時に決める。
+- 障害の段階は12種類（5.4）。
+- `fnv1a64` は最初のメジャーでは対象外（5.1）。
+- 保持件数「なし」と `retention_mode` の組は、方式を無視する（2.8）。
+- 設定照合の再要求回数の既定値は10回（2.8）。
+- メモリの場面にある障害の段階は5.4のとおり。
+- ゼロ値の封筒は契約違反（2.1）。
+- D-7 の見積もりは多めに見積もる方式（4.5）。
+- DynamoDB Local の起動オプションは6.1のとおり。
+- 試験用フックは `internal/testhook` に置く（5.3）。
+
+書いている途中で仕様の読み方に迷った点が出たら、ここに書く。
