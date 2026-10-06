@@ -562,7 +562,7 @@ type record struct {
 
 1. 履歴 GSI を `aid = :aid`、`ScanIndexForward=false` で `Query` し、読み切る（KEYS_ONLY）。結果整合の読み取り（DY-18）。
 2. 今書いた履歴を加える。すでに見えていれば重ねない。降順の先頭 n 件を残し、それより古いものを対象にする（S-2）。
-3. 削除方式は、`BatchWriteItem` を25件ずつ送る（P-18）。`UnprocessedItems` は再送する。
+3. 削除方式は、`BatchWriteItem` を25件ずつ送る（P-18）。`UnprocessedItems` は、残った項目だけを指数バックオフで再送する。再送の上限と待ち時間は、設定照合（2.8）と同じく `ConfigurationReadRetryLimit`（既定10回。初回は数えない）と、最初50ミリ秒・毎回2倍・上限1秒とする。上限に達したら、残りを削除せずに保持の失敗として手順5で知らせ、書き込みの結果は変えない。残った履歴は、次の保持処理で再び対象になる（設計の判断。仕様は再送することだけを定め、上限を定めない。保持を書き込みの呼び出しの中で行うので、上限がないと呼び出しが戻らないおそれがある）。
 4. TTL 方式は、1件ずつ `UpdateItem`: `SET #ttl = :expires REMOVE active_history_seq_nr`、条件 `attribute_exists(active_history_seq_nr)`。`#ttl` は `ExpressionAttributeNames`。`:expires` は印付け時点のエポック秒 + `WithTTLGraceSeconds` の猶予秒（指定しなければ 0）。条件が失敗したら、印付け済みとして読み飛ばす。
 5. 失敗は書き込みの結果を変えない。S-4 の通知経路で知らせる。
 
