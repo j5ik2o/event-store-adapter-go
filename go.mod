@@ -1,4 +1,4 @@
-module github.com/j5ik2o/event-store-adapter-go
+module github.com/j5ik2o/event-store-adapter-go/v2
 
 go 1.25.0
 

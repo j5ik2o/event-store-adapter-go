@@ -3,8 +3,8 @@ package test
 import (
 	"context"
 	"fmt"
-	"github.com/j5ik2o/event-store-adapter-go/pkg"
-	"github.com/j5ik2o/event-store-adapter-go/pkg/common"
+	"github.com/j5ik2o/event-store-adapter-go/v2/pkg"
+	"github.com/j5ik2o/event-store-adapter-go/v2/pkg/common"
 	"testing"
 	"time"
 

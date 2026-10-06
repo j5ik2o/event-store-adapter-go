@@ -2,7 +2,7 @@ package test
 
 import (
 	"fmt"
-	esag "github.com/j5ik2o/event-store-adapter-go/pkg"
+	esag "github.com/j5ik2o/event-store-adapter-go/v2/pkg"
 )
 
 type userAccountCreated struct {
