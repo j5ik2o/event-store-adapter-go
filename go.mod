@@ -6,9 +6,9 @@ toolchain go1.27.1
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.47.1
-	github.com/aws/aws-sdk-go-v2/config v1.33.6
-	github.com/aws/aws-sdk-go-v2/credentials v1.20.6
-	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.70.0
+	github.com/aws/aws-sdk-go-v2/config v1.33.7
+	github.com/aws/aws-sdk-go-v2/credentials v1.20.7
+	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.70.1
 	github.com/dlclark/regexp2 v1.12.0
 	github.com/oklog/ulid/v2 v2.1.2
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
@@ -28,10 +28,10 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.19 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/endpoint-discovery v1.13.4 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.14.4 // indirect
-	github.com/aws/aws-sdk-go-v2/service/signin v1.10.1 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sso v1.38.1 // indirect
-	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.43.1 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sts v1.51.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/signin v1.10.2 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sso v1.38.2 // indirect
+	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.43.2 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sts v1.51.2 // indirect
 	github.com/aws/smithy-go v1.28.1 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
