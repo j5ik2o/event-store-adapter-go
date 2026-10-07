@@ -64,14 +64,13 @@ type Report struct {
 const (
 	reasonFnv1a64         = "最初のメジャーにはハッシュを使う保存先がなく、FNV-1a 64 は段階 5 で実行する（設計 5.1）"
 	reasonMillis          = "Go の time.Time はナノ秒精度であり、representation.time_precision が milliseconds のケースは対象外（設計 5.1）"
-	reasonValueNoCore     = "値の表の操作は実行していない。中核に未接続（設計 7.2 の2番）"
 	reasonLayoutNoBackend = "配置照合は実行していない。DynamoDB に未接続（設計 7.2 の4番）"
 )
 
 // classifyCases decides the status and the reason of every case on every backend it targets.
 // Scenarios go through the scenario runner; no backend is connected, so they are either
-// not-applicable or unverified. Value-table and layout cases are not executed yet.
-// No case is a success.
+// not-applicable or unverified. ID and sequence-number values execute against the core;
+// time and layout cases remain unverified without storage backends.
 func classifyCases(d *Data) []CaseResult {
 	var out []CaseResult
 	for _, c := range d.Values {
@@ -82,7 +81,7 @@ func classifyCases(d *Data) []CaseResult {
 		case c.TimePrecision == "milliseconds":
 			r.Status, r.Reason = StatusNotApplicable, reasonMillis
 		default:
-			r.Status, r.Reason = StatusUnverified, reasonValueNoCore
+			r = runValueCase(c)
 		}
 		out = append(out, r)
 	}

@@ -10,14 +10,23 @@ import (
 )
 
 func TestLoadRequired(t *testing.T) {
-	t.Run("the shipped list starts empty per backend", func(t *testing.T) {
+	t.Run("the shipped list requires connected ID and sequence-number cases", func(t *testing.T) {
 		req, err := LoadRequired("required.json")
 		require.NoError(t, err)
+		d, err := LoadData(dataRoot())
+		require.NoError(t, err)
+		var expected []string
+		for _, c := range d.Values {
+			if c.Operation == "buildAid" || c.Operation == "validateSeqNr" {
+				expected = append(expected, c.ID)
+			}
+		}
+		require.Len(t, expected, 15)
 		assert.Len(t, req, 2)
 		for _, k := range []string{"memory", "dynamodb"} {
 			v, ok := req[k]
 			assert.True(t, ok, k)
-			assert.Empty(t, v, k)
+			assert.ElementsMatch(t, expected, v, k)
 		}
 	})
 
@@ -43,6 +52,31 @@ func TestLoadRequired(t *testing.T) {
 		_, err := LoadRequired(filepath.Join(t.TempDir(), "none.json"))
 		assert.Error(t, err)
 	})
+}
+
+func TestRequiredCoreValues(t *testing.T) {
+	req, err := LoadRequired("required.json")
+	require.NoError(t, err)
+	results := loadClassified(t)
+	gate, err := EvaluateRequired(req, results)
+	require.NoError(t, err)
+	assert.Empty(t, gate.Violations)
+	for _, status := range []Status{StatusFailure, StatusUnverified} {
+		for i, r := range results {
+			if r.Backend != "" || !contains(req["memory"], r.ID) {
+				continue
+			}
+			t.Run(r.ID+"/"+string(status), func(t *testing.T) {
+				changed := append([]CaseResult(nil), results...)
+				changed[i].Status = status
+				gate, err := EvaluateRequired(req, changed)
+				require.NoError(t, err)
+				require.Len(t, gate.Violations, 2)
+				assert.Contains(t, gate.Violations[0], r.ID)
+				assert.Contains(t, gate.Violations[1], r.ID)
+			})
+		}
+	}
 }
 
 func TestEvaluateRequired(t *testing.T) {

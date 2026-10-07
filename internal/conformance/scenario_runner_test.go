@@ -618,8 +618,11 @@ func TestRunScenarioCases_NoBackend(t *testing.T) {
 		assert.NotEmpty(t, r.Backend, r.ID)
 	}
 
-	t.Run("classifyCases reports no success and no failure for the whole data", func(t *testing.T) {
+	t.Run("classifyCases reports no success and no failure for unconnected backends", func(t *testing.T) {
 		for _, r := range classifyCases(d) {
+			if r.Backend == "" {
+				continue
+			}
 			assert.NotEqual(t, StatusSuccess, r.Status, r.ID)
 			assert.NotEqual(t, StatusFailure, r.Status, r.ID)
 		}

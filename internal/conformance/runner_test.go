@@ -59,10 +59,6 @@ func TestConformance(t *testing.T) {
 		t.Fatalf("report is not valid json: %v", err)
 	}
 	t.Logf("summary: %v", top.Summary)
-	if top.Summary["success"] != 0 {
-		t.Fatalf("nothing is executed yet, success must be 0: %v", top.Summary)
-	}
-
 	if reasons := rep.FailureReasons(); len(reasons) > 0 {
 		t.Fatalf("conformance failed: %v", reasons)
 	}
