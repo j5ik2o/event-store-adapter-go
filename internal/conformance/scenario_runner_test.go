@@ -485,11 +485,23 @@ func TestRunScenario_Clock(t *testing.T) {
 	t.Run("a step clock without a scenario clock reaches the store for that operation", func(t *testing.T) {
 		const stepClock = int64(5000000000) // 2128-06-11T13:33:20Z
 		b := &fakeBackend{name: "memory", injectable: true}
+		before := time.Now().Add(-time.Second)
 		r := runScenario(ctx, mkCase(t, scenarioBody("", "", stepClockStep(stepClock))), "memory", b)
+		after := time.Now().Add(time.Second)
 		require.Equal(t, StatusSuccess, r.Status, r.Reason)
 		require.NotNil(t, b.last)
+		assert.True(t, b.last.openTime.After(before) && b.last.openTime.Before(after), "store creation should use real time until the first step clock")
 		require.Len(t, b.last.times, 1)
 		assert.Equal(t, time.Unix(stepClock, 0).UTC(), b.last.times[0])
+	})
+
+	t.Run("a zero scenario clock explicitly selects the Unix epoch", func(t *testing.T) {
+		b := &fakeBackend{name: "memory", injectable: true}
+		body := scenarioBodyClock(`"clock":{"epoch_seconds":0},`, persistOK)
+		r := runScenario(ctx, mkCase(t, body), "memory", b)
+		require.Equal(t, StatusSuccess, r.Status, r.Reason)
+		require.NotNil(t, b.last)
+		assert.Equal(t, time.Unix(0, 0).UTC(), b.last.openTime)
 	})
 
 	t.Run("a scenario with no clock leaves the real time in place", func(t *testing.T) {

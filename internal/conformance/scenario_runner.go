@@ -62,6 +62,7 @@ func runScenario(ctx context.Context, c ScenarioCase, backend string, b Backend)
 	hooks := testhook.New()
 	hooks.SetSleeper(func(time.Duration) {})
 	var clock atomic.Int64
+	var clockSet atomic.Bool
 	needsClock := plan.ClockStart != nil
 	for _, s := range plan.Steps {
 		if s.ClockEpochSeconds != nil {
@@ -72,8 +73,14 @@ func runScenario(ctx context.Context, c ScenarioCase, backend string, b Backend)
 	if needsClock {
 		if plan.ClockStart != nil {
 			clock.Store(*plan.ClockStart)
+			clockSet.Store(true)
 		}
-		hooks.SetClock(func() time.Time { return time.Unix(clock.Load(), 0).UTC() })
+		hooks.SetClock(func() time.Time {
+			if !clockSet.Load() {
+				return time.Now().UTC()
+			}
+			return time.Unix(clock.Load(), 0).UTC()
+		})
 	}
 	registerHookFaults(hooks, faults)
 
@@ -110,6 +117,7 @@ func runScenario(ctx context.Context, c ScenarioCase, backend string, b Backend)
 		cursor.Set(n)
 		if s.ClockEpochSeconds != nil {
 			clock.Store(*s.ClockEpochSeconds)
+			clockSet.Store(true)
 		}
 		out := execStep(ctx, store, plan, s)
 		if msg := checkExpectation(plan, s, out); msg != "" {
