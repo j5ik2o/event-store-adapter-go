@@ -173,3 +173,56 @@ func TestLoadData_Exclusions(t *testing.T) {
 	assert.NotEmpty(t, byRule["W-5"].Reason)
 	assert.NotEmpty(t, byRule["R-7"].Reason)
 }
+
+func TestLoadData_ValueInputShape(t *testing.T) {
+	t.Run("the real data has an input of the right shape for every operation", func(t *testing.T) {
+		_, err := LoadData(dataRoot())
+		require.NoError(t, err)
+	})
+
+	cases := []struct {
+		name, file, from, to string
+	}{
+		{"a utf8 input on buildAid", "hash.json", `"operation": "fnv1a64"`, `"operation": "buildAid"`},
+		{"an aggregate_id input on validateSeqNr", "aid.json", `"operation": "buildAid"`, `"operation": "validateSeqNr"`},
+		{"an aggregate_id input on validateOccurredAt", "aid.json", `"operation": "buildAid"`, `"operation": "validateOccurredAt"`},
+		{"an aggregate_id input on fnv1a64", "aid.json", `"operation": "buildAid"`, `"operation": "fnv1a64"`},
+		{"a seq_nr input on validateOccurredAt", "seq-nr.json", `"operation": "validateSeqNr"`, `"operation": "validateOccurredAt"`},
+		{"a seq_nr input on buildAid", "seq-nr.json", `"operation": "validateSeqNr"`, `"operation": "buildAid"`},
+		{"an occurred-at input on validateSeqNr", "occurred-at.json", `"operation": "validateOccurredAt"`, `"operation": "validateSeqNr"`},
+		{"an occurred-at input on fnv1a64", "occurred-at.json", `"operation": "validateOccurredAt"`, `"operation": "fnv1a64"`},
+	}
+	for _, c := range cases {
+		t.Run("rejects "+c.name, func(t *testing.T) {
+			root := copyTree(t)
+			replaceInFile(t, filepath.Join(root, "values", c.file), c.from, c.to)
+			_, err := LoadData(root)
+			assert.Error(t, err)
+		})
+	}
+}
+
+func TestParseScenario(t *testing.T) {
+	t.Run("every real scenario has a parsed plan", func(t *testing.T) {
+		d, err := LoadData(dataRoot())
+		require.NoError(t, err)
+		require.NotEmpty(t, d.Scenarios)
+		for _, c := range d.Scenarios {
+			assert.NotNil(t, c.Plan, c.ID)
+		}
+	})
+
+	t.Run("a step that names an unknown fixture is a data error", func(t *testing.T) {
+		root := copyTree(t)
+		replaceInFile(t, filepath.Join(root, "scenarios", "core", "write-read.json"), `"event": "e2"`, `"event": "no-such-fixture"`)
+		_, err := LoadData(root)
+		assert.Error(t, err)
+	})
+
+	t.Run("a fault whose operation is beyond the steps is a data error", func(t *testing.T) {
+		root := copyTree(t)
+		replaceInFile(t, filepath.Join(root, "scenarios", "core", "retention-errors.json"), `"operation": 1,`, `"operation": 99,`)
+		_, err := LoadData(root)
+		assert.Error(t, err)
+	})
+}

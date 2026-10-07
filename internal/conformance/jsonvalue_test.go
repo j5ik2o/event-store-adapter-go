@@ -93,3 +93,38 @@ func TestDecodeStrictJSON_InvalidUTF8(t *testing.T) {
 	_, err := decodeStrictJSON([]byte(`"あ"`))
 	assert.NoError(t, err)
 }
+
+func TestDecodeStrictJSON_Surrogate(t *testing.T) {
+	t.Run("a paired surrogate escape is accepted", func(t *testing.T) {
+		v, err := decodeStrictJSON([]byte(`"\ud83d\ude00"`))
+		require.NoError(t, err)
+		assert.Equal(t, "😀", v)
+	})
+
+	t.Run("a raw emoji is accepted", func(t *testing.T) {
+		v, err := decodeStrictJSON([]byte(`"😀"`))
+		require.NoError(t, err)
+		assert.Equal(t, "😀", v)
+	})
+
+	t.Run("an escaped backslash before ud800 is a plain string", func(t *testing.T) {
+		v, err := decodeStrictJSON([]byte(`"\\ud800"`))
+		require.NoError(t, err)
+		assert.Equal(t, `\ud800`, v)
+	})
+
+	for _, in := range []string{`"\ud800"`, `"\ud800A"`, `"\ud800x"`} {
+		t.Run("an unpaired high surrogate is rejected: "+in, func(t *testing.T) {
+			v, err := decodeStrictJSON([]byte(in))
+			require.Error(t, err)
+			assert.Nil(t, v)
+		})
+	}
+
+	for _, in := range []string{`"\udc00"`, `{"\ud800":1}`} {
+		t.Run("a lone low surrogate or a high surrogate in a key is rejected: "+in, func(t *testing.T) {
+			_, err := decodeStrictJSON([]byte(in))
+			assert.Error(t, err)
+		})
+	}
+}

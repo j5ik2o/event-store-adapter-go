@@ -102,3 +102,35 @@ func TestEvaluateRequired(t *testing.T) {
 		assert.Contains(t, g.Violations[0], "dynamodb")
 	})
 }
+
+func TestEvaluateRequired_ValueCases(t *testing.T) {
+	results := []CaseResult{
+		{ID: "val-u", Status: Status("unverified"), Reason: "r"},
+		{ID: "val-s", Status: Status("success"), Reason: "r"},
+		{ID: "val-n", Status: Status("not-applicable"), Reason: "r"},
+		{ID: "val-f", Status: Status("failure"), Reason: "r"},
+	}
+
+	t.Run("an unverified value case is a violation under either backend list", func(t *testing.T) {
+		g, err := EvaluateRequired(RequiredList{"memory": {"val-u"}, "dynamodb": {}}, results)
+		require.NoError(t, err)
+		assert.Len(t, g.Violations, 1)
+		g, err = EvaluateRequired(RequiredList{"memory": {}, "dynamodb": {"val-u"}}, results)
+		require.NoError(t, err)
+		assert.Len(t, g.Violations, 1)
+	})
+	t.Run("a failed value case is a violation", func(t *testing.T) {
+		g, err := EvaluateRequired(RequiredList{"memory": {"val-f"}, "dynamodb": {}}, results)
+		require.NoError(t, err)
+		assert.Len(t, g.Violations, 1)
+	})
+	t.Run("a successful or not-applicable value case is not a violation", func(t *testing.T) {
+		g, err := EvaluateRequired(RequiredList{"memory": {"val-s", "val-n"}, "dynamodb": {}}, results)
+		require.NoError(t, err)
+		assert.Empty(t, g.Violations)
+	})
+	t.Run("an unknown id is still a runner error", func(t *testing.T) {
+		_, err := EvaluateRequired(RequiredList{"memory": {"ghost"}, "dynamodb": {}}, results)
+		assert.Error(t, err)
+	})
+}
