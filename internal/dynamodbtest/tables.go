@@ -136,8 +136,6 @@ func (t *Tables) TableName(table Table) (string, error) {
 	return name, nil
 }
 
-func (t *Tables) HistoryIndexName() string { return t.index }
-
 func (t *Tables) Close(ctx context.Context) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
