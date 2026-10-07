@@ -17,6 +17,8 @@ import (
 
 const localImage = "amazon/dynamodb-local@sha256:ff89bd48ff32cd8d9be5fee8873b65b8854dc408f1afe881be6eb00247bc0dab"
 
+var createContainer = testcontainers.GenericContainer
+
 // Environment owns one DynamoDB Local container and its explicit SDK endpoint.
 type Environment struct {
 	container testcontainers.Container
@@ -29,7 +31,7 @@ type Environment struct {
 func Start(ctx context.Context) (*Environment, error) {
 	readyCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	container, err := testcontainers.GenericContainer(readyCtx, testcontainers.GenericContainerRequest{
+	container, err := createContainer(readyCtx, testcontainers.GenericContainerRequest{
 		ContainerRequest: testcontainers.ContainerRequest{
 			Image:        localImage,
 			ExposedPorts: []string{"8000/tcp"},

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/containerd/errdefs"
 	dockerclient "github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -72,6 +73,63 @@ func TestContainerLifecycle(t *testing.T) {
 	defer cancel()
 	_, err = client.ListTables(ctx, &dynamodb.ListTablesInput{})
 	require.Error(t, err)
+}
+
+func TestStartCancellationCleansAcquiredContainer(t *testing.T) {
+	// Given an acquired container, When Start's parent context is canceled, Then Start releases it and returns the cancellation.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	docker, err := testcontainers.NewDockerClientWithOpts(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, docker.Close()) })
+	original := createContainer
+	t.Cleanup(func() { createContainer = original })
+	var containerID string
+	var parentErr, cleanupErr error
+	terminateCalls := 0
+	createContainer = func(readyCtx context.Context, request testcontainers.GenericContainerRequest) (testcontainers.Container, error) {
+		request.LifecycleHooks = append(request.LifecycleHooks, testcontainers.ContainerLifecycleHooks{
+			PreTerminates: []testcontainers.ContainerHook{func(cleanupCtx context.Context, _ testcontainers.Container) error {
+				terminateCalls++
+				parentErr = ctx.Err()
+				cleanupErr = cleanupCtx.Err()
+				return nil
+			}},
+		})
+		container, err := testcontainers.GenericContainer(readyCtx, request)
+		if container != nil {
+			t.Cleanup(func() {
+				cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cleanupCancel()
+				_, inspectErr := docker.ContainerInspect(cleanupCtx, container.GetContainerID(), dockerclient.ContainerInspectOptions{})
+				if errdefs.IsNotFound(inspectErr) {
+					return
+				}
+				require.NoError(t, inspectErr)
+				require.NoError(t, container.Terminate(cleanupCtx))
+			})
+		}
+		require.NoError(t, err)
+		require.NotNil(t, container)
+		containerID = container.GetContainerID()
+		inspection, inspectErr := docker.ContainerInspect(readyCtx, containerID, dockerclient.ContainerInspectOptions{})
+		require.NoError(t, inspectErr)
+		require.Equal(t, containerID, inspection.Container.ID)
+		require.True(t, inspection.Container.State.Running)
+		require.NoError(t, readyCtx.Err())
+		cancel()
+		return container, err
+	}
+
+	e, err := Start(ctx)
+
+	require.Nil(t, e)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, 1, terminateCalls)
+	require.ErrorIs(t, parentErr, context.Canceled)
+	require.NoError(t, cleanupErr)
+	_, err = docker.ContainerInspect(context.Background(), containerID, dockerclient.ContainerInspectOptions{})
+	require.ErrorIs(t, err, errdefs.ErrNotFound, "Start must remove the acquired container before test cleanup")
 }
 
 func TestContainerIgnoresAmbientAWSConfiguration(t *testing.T) {
