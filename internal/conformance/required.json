@@ -1,4 +1,36 @@
 {
-  "memory": [],
-  "dynamodb": []
+  "memory": [
+    "aid-library-format",
+    "aid-hyphen-value",
+    "aid-hyphen-type",
+    "aid-ascii-1023",
+    "aid-ascii-1024",
+    "aid-ascii-1025",
+    "aid-multibyte-1023",
+    "aid-multibyte-1024",
+    "aid-multibyte-1025",
+    "seq-zero-value",
+    "seq-max-value",
+    "seq-one-event",
+    "seq-zero-event",
+    "seq-negative-value",
+    "seq-above-max-value"
+  ],
+  "dynamodb": [
+    "aid-library-format",
+    "aid-hyphen-value",
+    "aid-hyphen-type",
+    "aid-ascii-1023",
+    "aid-ascii-1024",
+    "aid-ascii-1025",
+    "aid-multibyte-1023",
+    "aid-multibyte-1024",
+    "aid-multibyte-1025",
+    "seq-zero-value",
+    "seq-max-value",
+    "seq-one-event",
+    "seq-zero-event",
+    "seq-negative-value",
+    "seq-above-max-value"
+  ]
 }

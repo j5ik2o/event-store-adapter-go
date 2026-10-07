@@ -25,12 +25,14 @@ func TestClassify(t *testing.T) {
 	counts := map[Status]int{}
 	for _, r := range results {
 		counts[r.Status]++
-		assert.NotEmpty(t, r.Reason, r.ID)
+		if r.Status != StatusSuccess {
+			assert.NotEmpty(t, r.Reason, r.ID)
+		}
 	}
-	assert.Equal(t, 0, counts[Status("success")])
+	assert.Equal(t, 15, counts[Status("success")])
 	assert.Equal(t, 0, counts[Status("failure")])
 	assert.Equal(t, 16, counts[Status("not-applicable")])
-	assert.Equal(t, 142, counts[Status("unverified")])
+	assert.Equal(t, 127, counts[Status("unverified")])
 	assert.Equal(t, 0, counts[Status("unrepresentable")])
 
 	byID := map[string]CaseResult{}
@@ -41,7 +43,7 @@ func TestClassify(t *testing.T) {
 		require.Contains(t, byID, id)
 		assert.Equal(t, Status("not-applicable"), byID[id].Status, id)
 	}
-	assert.Equal(t, Status("unverified"), byID["seq-zero-value"].Status)
+	assert.Equal(t, StatusSuccess, byID["seq-zero-value"].Status)
 }
 
 func TestReport(t *testing.T) {
@@ -65,9 +67,9 @@ func TestReport(t *testing.T) {
 	for _, k := range statusKeys {
 		assert.Contains(t, summary, k)
 	}
-	assert.EqualValues(t, 0, summary["success"])
+	assert.EqualValues(t, 15, summary["success"])
 	assert.EqualValues(t, 16, summary["not-applicable"])
-	assert.EqualValues(t, 142, summary["unverified"])
+	assert.EqualValues(t, 127, summary["unverified"])
 	cases, ok := top["cases"].([]any)
 	require.True(t, ok)
 	assert.Len(t, cases, 158, "one result per case id and backend")
@@ -124,7 +126,9 @@ func TestClassify_PerBackend(t *testing.T) {
 	d := &Data{
 		Scenarios: []ScenarioCase{{ID: "s", Rules: []string{"T-1"}, Backends: []string{"memory", "dynamodb"}}},
 		Layouts:   []LayoutCase{{ID: "l", Rules: []string{"L-1"}}},
-		Values:    []ValueCase{{ID: "v", Operation: "buildAid"}},
+		Values: []ValueCase{{ID: "v", Operation: "buildAid",
+			Input:  ValueInput{Raw: map[string]any{"aggregate_id": map[string]any{"type_name": "Order", "value": "1"}}},
+			Expect: map[string]any{"value": "Order-1"}}},
 	}
 	got := classifyCases(d)
 	type key struct{ id, backend string }

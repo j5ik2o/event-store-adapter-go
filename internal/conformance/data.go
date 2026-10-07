@@ -21,7 +21,7 @@ type ValueInput struct {
 	EpochNanoseconds *big.Int
 }
 
-// ValueCase is a case of values/*.json. It is loaded but not executed.
+// ValueCase is a case of values/*.json, with precision-preserving inputs and expectations.
 type ValueCase struct {
 	ID            string
 	File          string
