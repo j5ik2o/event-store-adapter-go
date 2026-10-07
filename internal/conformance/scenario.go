@@ -17,8 +17,7 @@ type ScenarioPlan struct {
 	Requires []string
 	// ClockStart is the clock of the scenario (clock.epoch_seconds), if any.
 	ClockStart *int64
-	// UnwiredObservation names the first observation that the runner cannot check yet
-	// (DynamoDB items and requests), or is empty.
+	// UnwiredObservation names the first observation that the runner cannot check yet, or is empty.
 	UnwiredObservation string
 }
 
@@ -147,6 +146,14 @@ func parseScenario(m map[string]any) (*ScenarioPlan, error) {
 		}
 		if obs, ok := im["observe"].(map[string]any); ok {
 			p.noteObservation(obs)
+			if p.UnwiredObservation == "" {
+				for _, key := range []string{"history", "notifications"} {
+					if _, present := obs[key]; present {
+						p.UnwiredObservation = "initialization.observe." + key
+						break
+					}
+				}
+			}
 		}
 	}
 

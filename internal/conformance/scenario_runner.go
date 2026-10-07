@@ -17,7 +17,7 @@ import (
 
 const (
 	reasonNoBackend     = "保存先の境界が未接続のため、場面を実行していない（設計 7.2 の4番以降）"
-	reasonUnwired       = "DynamoDB の観測（items・requests・要求数）の手段がまだなく、場面を検証できない（設計 7.2 の4番・10番）"
+	reasonUnwired       = "観測を検査する手段がまだなく、場面を検証できない"
 	reasonNotInjectable = "保存先が差し込めない障害を持つため、場面を検証できない（設計 5.4）"
 	reasonMemoryTTL     = "TTL 方式を要求する場面は DynamoDB だけで、メモリでは対象外（設計 5.2 の1）"
 )

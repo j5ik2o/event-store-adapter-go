@@ -504,6 +504,21 @@ func TestRunScenario_Clock(t *testing.T) {
 
 func TestRunScenario_UnwiredObservation(t *testing.T) {
 	ctx := context.Background()
+	for _, tc := range []struct {
+		key, observation string
+	}{
+		{"history", `{"history":{"active":[1],"marked":[],"absent":[]}}`},
+		{"notifications", `{"notifications":["retention-failure"]}`},
+	} {
+		t.Run("an unwired initialization "+tc.key+" observation leaves the scenario unverified", func(t *testing.T) {
+			init := `{"expect":{"result":"success"},"observe":` + tc.observation + `}`
+			b := &fakeBackend{name: "memory", injectable: true}
+			r := runScenario(ctx, mkCase(t, scenarioBody(init, "")), "memory", b)
+			assert.Equal(t, StatusUnverified, r.Status)
+			assert.Contains(t, r.Reason, "initialization.observe."+tc.key)
+			assert.Equal(t, int32(0), b.opens)
+		})
+	}
 
 	for _, key := range []string{"items", "requests", "no_requests_in_phases", "request_count", "minimum_request_count"} {
 		t.Run("an unwired "+key+" observation leaves the scenario unverified and the store unopened", func(t *testing.T) {
