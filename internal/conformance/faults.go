@@ -132,7 +132,11 @@ func registerHookFaults(h *testhook.Hooks, faults []*Fault) {
 			f := f
 			h.OnFail(phase, func(testhook.Point) error {
 				if f.TryApply() {
-					return &testhook.InjectedError{Phase: phase, Message: f.Spec.Kind}
+					message, ok := f.Spec.Details["message"].(string)
+					if !ok {
+						message = f.Spec.Kind
+					}
+					return &testhook.InjectedError{Phase: phase, Message: message}
 				}
 				return nil
 			})

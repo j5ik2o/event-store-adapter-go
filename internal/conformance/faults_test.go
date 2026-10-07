@@ -138,7 +138,7 @@ func TestRegisterHookFaults(t *testing.T) {
 		fs := newFaults([]FaultSpec{countSpec(1, "commit", "storage-error", 1)}, cur)
 		h := testhook.New()
 		registerHookFaults(h, fs)
-		assert.Error(t, h.Fail(testhook.Point{Phase: phase("commit"), AggregateID: "Order-1", SeqNr: 1}))
+		assert.EqualError(t, h.Fail(testhook.Point{Phase: phase("commit"), AggregateID: "Order-1", SeqNr: 1}), "injected fault at commit: storage-error")
 		assert.Equal(t, 1, fs[0].Fired())
 		assert.NoError(t, h.Fail(testhook.Point{Phase: phase("commit"), AggregateID: "Order-1", SeqNr: 2}))
 		assert.Equal(t, 1, fs[0].Fired())
@@ -150,8 +150,31 @@ func TestRegisterHookFaults(t *testing.T) {
 		fs := newFaults([]FaultSpec{countSpec(1, "serialize-event", "serialization-error", 1)}, cur)
 		h := testhook.New()
 		registerHookFaults(h, fs)
-		assert.Error(t, h.Fail(testhook.Point{Phase: phase("serialize-event")}))
+		assert.EqualError(t, h.Fail(testhook.Point{Phase: phase("serialize-event")}), "injected fault at serialize-event: serialization-error")
 		assert.Equal(t, 1, fs[0].Fired())
+	})
+
+	t.Run("hook faults preserve their configured messages", func(t *testing.T) {
+		for _, tc := range []struct {
+			phase, kind, message string
+		}{
+			{"commit", "storage-error", "STORAGE_SENTINEL"},
+			{"serialize-event", "serialization-error", "SERIALIZATION_SENTINEL"},
+			{"retention-delete", "storage-error", "RETENTION_FAILURE"},
+			{"commit", "storage-error", ""},
+		} {
+			t.Run(tc.phase+"/"+tc.message, func(t *testing.T) {
+				cur := &operationCursor{}
+				cur.Set(1)
+				spec := countSpec(1, tc.phase, tc.kind, 1)
+				spec.Details = map[string]any{"message": tc.message}
+				fs := newFaults([]FaultSpec{spec}, cur)
+				h := testhook.New()
+				registerHookFaults(h, fs)
+				assert.EqualError(t, h.Fail(testhook.Point{Phase: phase(tc.phase)}), "injected fault at "+tc.phase+": "+tc.message)
+				assert.Equal(t, 1, fs[0].Fired())
+			})
+		}
 	})
 
 	t.Run("a hook of another phase does not fire the fault", func(t *testing.T) {
