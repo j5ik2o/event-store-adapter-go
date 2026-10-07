@@ -16,7 +16,7 @@ import (
 
 type Table string
 
-// Tables owns only the resources successfully created for one scenario.
+// Tables tracks this scenario's table creation attempts, excluding confirmed name conflicts.
 type Tables struct {
 	client *dynamodb.Client
 	names  map[Table]string
@@ -66,10 +66,14 @@ func (e *Environment) createTables(ctx context.Context, client *dynamodb.Client,
 			input.AttributeDefinitions = append(input.AttributeDefinitions, types.AttributeDefinition{AttributeName: aws.String("active_history_seq_nr"), AttributeType: types.ScalarAttributeTypeN})
 			input.GlobalSecondaryIndexes = []types.GlobalSecondaryIndex{{IndexName: aws.String(t.index), KeySchema: []types.KeySchemaElement{{AttributeName: aws.String("aid"), KeyType: types.KeyTypeHash}, {AttributeName: aws.String("active_history_seq_nr"), KeyType: types.KeyTypeRange}}, Projection: &types.Projection{ProjectionType: types.ProjectionTypeKeysOnly}}}
 		}
+		t.owned = append(t.owned, name)
 		if _, err := client.CreateTable(readyCtx, input); err != nil {
+			var conflict *types.ResourceInUseException
+			if errors.As(err, &conflict) {
+				t.owned = t.owned[:len(t.owned)-1]
+			}
 			return fail(err)
 		}
-		t.owned = append(t.owned, name)
 		if err := poll(readyCtx, func() (bool, error) {
 			out, err := client.DescribeTable(readyCtx, &dynamodb.DescribeTableInput{TableName: aws.String(name)})
 			if err != nil {

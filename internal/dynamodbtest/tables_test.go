@@ -299,6 +299,77 @@ func TestTableCreationFailureCleansPartialResources(t *testing.T) {
 	require.Equal(t, journalItem("survived"), readJournal(t, e, existing["journal"]))
 }
 
+func TestTableCreationResponseFailureCleansCreatedResources(t *testing.T) {
+	e := startEnvironment(t)
+	_, existing := createTables(t, e, false)
+	before := tableNames(t, e.NewClient())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	injected := errors.New("lost successful CreateTable response")
+	creates, deletes := 0, 0
+	var createdName string
+	client := e.NewClient(func(stack *middleware.Stack) error {
+		return stack.Initialize.Add(middleware.InitializeMiddlewareFunc("lose-create-response", func(callCtx context.Context, in middleware.InitializeInput, next middleware.InitializeHandler) (middleware.InitializeOutput, middleware.Metadata, error) {
+			switch input := in.Parameters.(type) {
+			case *dynamodb.CreateTableInput:
+				creates++
+				out, metadata, err := next.HandleInitialize(callCtx, in)
+				if err == nil && creates == 2 {
+					createdName = aws.ToString(input.TableName)
+					_, inspectErr := e.NewClient().DescribeTable(context.Background(), &dynamodb.DescribeTableInput{TableName: input.TableName})
+					require.NoError(t, inspectErr)
+					cancel()
+					return middleware.InitializeOutput{}, metadata, injected
+				}
+				return out, metadata, err
+			case *dynamodb.DeleteTableInput:
+				deletes++
+				require.ErrorIs(t, ctx.Err(), context.Canceled)
+				require.NoError(t, callCtx.Err())
+			}
+			return next.HandleInitialize(callCtx, in)
+		}), middleware.Before)
+	})
+	tables, err := e.createTables(ctx, client, false)
+	require.Nil(t, tables)
+	require.ErrorIs(t, err, injected)
+	require.Equal(t, 2, creates)
+	require.NotEmpty(t, createdName)
+	require.NotContains(t, tableNames(t, e.NewClient()), createdName, "failed creation must remove the table whose response was lost")
+	require.Equal(t, 2, deletes)
+	require.ElementsMatch(t, before, tableNames(t, e.NewClient()))
+	putJournal(t, e, existing["journal"], "survived")
+	require.Equal(t, journalItem("survived"), readJournal(t, e, existing["journal"]))
+}
+
+func TestTableCreationConflictPreservesOtherOwnerTableAndData(t *testing.T) {
+	e := startEnvironment(t)
+	_, existing := createTables(t, e, false)
+	before := tableNames(t, e.NewClient())
+	other := e.NewClient()
+	var otherName string
+	client := e.NewClient(func(stack *middleware.Stack) error {
+		return stack.Initialize.Add(middleware.InitializeMiddlewareFunc("create-before-request", func(ctx context.Context, in middleware.InitializeInput, next middleware.InitializeHandler) (middleware.InitializeOutput, middleware.Metadata, error) {
+			if input, ok := in.Parameters.(*dynamodb.CreateTableInput); ok && otherName == "" {
+				otherName = aws.ToString(input.TableName)
+				_, err := other.CreateTable(context.Background(), input)
+				require.NoError(t, err)
+				putJournal(t, e, otherName, "other-owner")
+			}
+			return next.HandleInitialize(ctx, in)
+		}), middleware.Before)
+	})
+	tables, err := e.createTables(context.Background(), client, false)
+	var conflict *types.ResourceInUseException
+	require.Nil(t, tables)
+	require.ErrorAs(t, err, &conflict)
+	require.NotEmpty(t, otherName)
+	require.ElementsMatch(t, append(before, otherName), tableNames(t, other))
+	require.Equal(t, journalItem("other-owner"), readJournal(t, e, otherName))
+	putJournal(t, e, existing["journal"], "survived")
+	require.Equal(t, journalItem("survived"), readJournal(t, e, existing["journal"]))
+}
+
 func TestTableCreationCancellationCleansPartialResources(t *testing.T) {
 	// Given a first created table, When creation is canceled, Then cleanup uses an independent context.
 	e := startEnvironment(t)
