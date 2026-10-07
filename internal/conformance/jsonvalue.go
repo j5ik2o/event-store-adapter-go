@@ -17,6 +17,9 @@ func decodeStrictJSON(data []byte) (any, error) {
 	if !utf8.Valid(data) {
 		return nil, errors.New("JSON is not valid UTF-8")
 	}
+	if err := checkSurrogateEscapes(data); err != nil {
+		return nil, err
+	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 	v, err := decodeValue(dec)
@@ -113,4 +116,68 @@ func bigIntFromDecimalString(v any) (*big.Int, error) {
 		return nil, fmt.Errorf("%q is not a decimal integer string", s)
 	}
 	return i, nil
+}
+
+// checkSurrogateEscapes rejects \uXXXX escapes of surrogates that are not a high surrogate
+// immediately followed by a low surrogate escape. encoding/json would silently replace them
+// with U+FFFD. It covers object keys as well as string values.
+func checkSurrogateEscapes(data []byte) error {
+	inString := false
+	for i := 0; i < len(data); i++ {
+		c := data[i]
+		if !inString {
+			inString = c == '"'
+			continue
+		}
+		switch c {
+		case '"':
+			inString = false
+		case '\\':
+			if i+1 >= len(data) {
+				return nil
+			}
+			if data[i+1] != 'u' {
+				i++ // skips the escaped character, including an escaped backslash
+				continue
+			}
+			r, ok := hex4(data, i+2)
+			if !ok {
+				return nil // malformed escape: the decoder reports it
+			}
+			i += 5
+			switch {
+			case r >= 0xDC00 && r <= 0xDFFF:
+				return fmt.Errorf("unpaired low surrogate escape \\u%04x", r)
+			case r >= 0xD800 && r <= 0xDBFF:
+				if i+2 < len(data) && data[i+1] == '\\' && data[i+2] == 'u' {
+					if low, ok := hex4(data, i+3); ok && low >= 0xDC00 && low <= 0xDFFF {
+						i += 6
+						continue
+					}
+				}
+				return fmt.Errorf("unpaired high surrogate escape \\u%04x", r)
+			}
+		}
+	}
+	return nil
+}
+
+func hex4(data []byte, at int) (rune, bool) {
+	if at+4 > len(data) {
+		return 0, false
+	}
+	var r rune
+	for _, b := range data[at : at+4] {
+		switch {
+		case b >= '0' && b <= '9':
+			r = r<<4 | rune(b-'0')
+		case b >= 'a' && b <= 'f':
+			r = r<<4 | rune(b-'a'+10)
+		case b >= 'A' && b <= 'F':
+			r = r<<4 | rune(b-'A'+10)
+		default:
+			return 0, false
+		}
+	}
+	return r, true
 }

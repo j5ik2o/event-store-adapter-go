@@ -1,6 +1,7 @@
 package conformance
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -61,37 +62,33 @@ type Report struct {
 }
 
 const (
-	reasonFnv1a64 = "最初のメジャーにはハッシュを使う保存先がなく、FNV-1a 64 は段階 5 で実行する（設計 5.1）"
-	reasonMillis  = "Go の time.Time はナノ秒精度であり、representation.time_precision が milliseconds のケースは対象外（設計 5.1）"
-	reasonNoStore = "場面と値の表の操作は実行していない。中核と保存先に未接続（設計 7.2 の2番）"
+	reasonFnv1a64         = "最初のメジャーにはハッシュを使う保存先がなく、FNV-1a 64 は段階 5 で実行する（設計 5.1）"
+	reasonMillis          = "Go の time.Time はナノ秒精度であり、representation.time_precision が milliseconds のケースは対象外（設計 5.1）"
+	reasonValueNoCore     = "値の表の操作は実行していない。中核に未接続（設計 7.2 の2番）"
+	reasonLayoutNoBackend = "配置照合は実行していない。DynamoDB に未接続（設計 7.2 の4番）"
 )
 
 // classifyCases decides the status and the reason of every case on every backend it targets.
-// Nothing is executed yet, so the status is either not-applicable or unverified, never success.
+// Scenarios go through the scenario runner; no backend is connected, so they are either
+// not-applicable or unverified. Value-table and layout cases are not executed yet.
+// No case is a success.
 func classifyCases(d *Data) []CaseResult {
-	classify := func(id string, rules []string, backend string, fnv bool, precision string) CaseResult {
-		r := CaseResult{ID: id, Rules: nonNil(rules), Backend: backend}
-		switch {
-		case fnv:
-			r.Status, r.Reason = StatusNotApplicable, reasonFnv1a64
-		case precision == "milliseconds":
-			r.Status, r.Reason = StatusNotApplicable, reasonMillis
-		default:
-			r.Status, r.Reason = StatusUnverified, reasonNoStore
-		}
-		return r
-	}
 	var out []CaseResult
 	for _, c := range d.Values {
-		out = append(out, classify(c.ID, c.Rules, "", c.Operation == "fnv1a64", c.TimePrecision))
-	}
-	for _, c := range d.Scenarios {
-		for _, b := range c.Backends {
-			out = append(out, classify(c.ID, c.Rules, b, false, c.TimePrecision))
+		r := CaseResult{ID: c.ID, Rules: nonNil(c.Rules)}
+		switch {
+		case c.Operation == "fnv1a64":
+			r.Status, r.Reason = StatusNotApplicable, reasonFnv1a64
+		case c.TimePrecision == "milliseconds":
+			r.Status, r.Reason = StatusNotApplicable, reasonMillis
+		default:
+			r.Status, r.Reason = StatusUnverified, reasonValueNoCore
 		}
+		out = append(out, r)
 	}
+	out = append(out, runScenarioCases(context.Background(), d.Scenarios, nil)...)
 	for _, c := range d.Layouts {
-		out = append(out, classify(c.ID, c.Rules, "dynamodb", false, ""))
+		out = append(out, CaseResult{ID: c.ID, Rules: nonNil(c.Rules), Backend: "dynamodb", Status: StatusUnverified, Reason: reasonLayoutNoBackend})
 	}
 	return out
 }

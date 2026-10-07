@@ -57,7 +57,7 @@ func LoadRequired(path string) (RequiredList, error) {
 }
 
 // EvaluateRequired records a violation for each listed case whose status is failure or unverified
-// on the listed backend. An ID that is not in the results, or that is listed under a backend
+// on the listed backend. A value-table case has no backend and is judged by its own result under either list. An ID that is not in the results, or that is listed under a backend
 // the case does not target, is an error of the runner.
 func EvaluateRequired(req RequiredList, results []CaseResult) (GateResult, error) {
 	type key struct{ id, backend string }
@@ -86,6 +86,10 @@ func EvaluateRequired(req RequiredList, results []CaseResult) (GateResult, error
 				return GateResult{}, fmt.Errorf("required case %q (%s) is not in the data", id, backend)
 			}
 			r, ok := byKey[key{id, backend}]
+			if !ok {
+				// A value-table case has no backend: it is judged by its own result, whichever list names it.
+				r, ok = byKey[key{id, ""}]
+			}
 			if !ok {
 				return GateResult{}, fmt.Errorf("required case %q is listed under %s but does not target it", id, backend)
 			}

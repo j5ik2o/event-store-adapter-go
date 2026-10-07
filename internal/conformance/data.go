@@ -42,6 +42,8 @@ type ScenarioCase struct {
 	TimePrecision string
 	Raw           map[string]any
 	Materialized  map[string]any
+	// Plan is Materialized read into its steps, faults and expectations.
+	Plan *ScenarioPlan
 }
 
 // LayoutCase is a case of dynamodb/layout.json.
@@ -61,8 +63,39 @@ type Data struct {
 	Exclusions []RuleExclusion
 }
 
-var valueOperations = map[string]bool{
-	"buildAid": true, "validateOccurredAt": true, "validateSeqNr": true, "fnv1a64": true,
+// valueInputShape lists the keys of the input of a value-table operation.
+type valueInputShape struct {
+	required []string
+	optional []string
+}
+
+// valueInputShapes is the set of supported operations, with the input each one takes.
+// The schema accepts any of the four shapes for any operation, so this ties them together.
+var valueInputShapes = map[string]valueInputShape{
+	"buildAid":           {required: []string{"aggregate_id"}, optional: []string{"user_string"}},
+	"validateOccurredAt": {required: []string{"iso8601", "epoch_nanoseconds", "event_seq_nr"}},
+	"validateSeqNr":      {required: []string{"seq_nr", "context"}},
+	"fnv1a64":            {required: []string{"utf8"}},
+}
+
+func checkValueInputShape(op string, in map[string]any) error {
+	shape := valueInputShapes[op]
+	allowed := map[string]bool{}
+	for _, k := range shape.required {
+		allowed[k] = true
+		if _, present := in[k]; !present {
+			return fmt.Errorf("input of %s needs %q", op, k)
+		}
+	}
+	for _, k := range shape.optional {
+		allowed[k] = true
+	}
+	for k := range in {
+		if !allowed[k] {
+			return fmt.Errorf("input of %s must not have %q", op, k)
+		}
+	}
+	return nil
 }
 
 // expectedFormat returns the top-level format that the JSON file at rel (slash separated)
@@ -256,9 +289,13 @@ func loadCases(d *Data, rel, format string, obj map[string]any, ids map[string]s
 			if err != nil {
 				return fmt.Errorf("%s: case %q: %w", rel, id, err)
 			}
+			plan, err := parseScenario(mat)
+			if err != nil {
+				return fmt.Errorf("%s: case %q: %w", rel, id, err)
+			}
 			d.Scenarios = append(d.Scenarios, ScenarioCase{
 				ID: id, File: rel, Rules: rules, Backends: backends, Requires: requires,
-				TimePrecision: precision, Raw: c, Materialized: mat,
+				TimePrecision: precision, Raw: c, Materialized: mat, Plan: plan,
 			})
 		case "layout":
 			d.Layouts = append(d.Layouts, LayoutCase{ID: id, File: rel, Rules: rules, Raw: c})
@@ -269,12 +306,15 @@ func loadCases(d *Data, rel, format string, obj map[string]any, ids map[string]s
 
 func newValueCase(rel, id string, rules []string, precision string, c map[string]any) (ValueCase, error) {
 	op, _ := c["operation"].(string)
-	if !valueOperations[op] {
+	if _, known := valueInputShapes[op]; !known {
 		return ValueCase{}, fmt.Errorf("unsupported operation %v", c["operation"])
 	}
 	in, ok := c["input"].(map[string]any)
 	if !ok {
 		return ValueCase{}, fmt.Errorf("input is not an object")
+	}
+	if err := checkValueInputShape(op, in); err != nil {
+		return ValueCase{}, err
 	}
 	expect, ok := c["expect"].(map[string]any)
 	if !ok {
