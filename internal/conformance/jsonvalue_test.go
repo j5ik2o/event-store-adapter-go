@@ -96,6 +96,12 @@ func TestDecodeStrictJSON_InvalidUTF8(t *testing.T) {
 
 func TestDecodeStrictJSON_Surrogate(t *testing.T) {
 	t.Run("a paired surrogate escape is accepted", func(t *testing.T) {
+		v, err := decodeStrictJSON([]byte(`"\ud83d\ude00"`))
+		require.NoError(t, err)
+		assert.Equal(t, "😀", v)
+	})
+
+	t.Run("a raw emoji is accepted", func(t *testing.T) {
 		v, err := decodeStrictJSON([]byte(`"😀"`))
 		require.NoError(t, err)
 		assert.Equal(t, "😀", v)

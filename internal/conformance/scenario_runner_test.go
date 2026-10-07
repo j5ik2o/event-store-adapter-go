@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/j5ik2o/event-store-adapter-go/v2/internal/testhook"
 	"github.com/stretchr/testify/assert"
@@ -27,24 +29,54 @@ type fakeBackend struct {
 	hookOnPersist bool
 	// sdkTries: how many times persistEvent calls TryApply on the injected faults.
 	sdkTries int
+	// seedErr is returned by Seed when it is not nil.
+	seedErr error
+	// seedCalls counts the Seed calls, in order with the Open calls recorded in opens.
+	seedCalls int32
+	// active and marked are the histories that Open provides through the hooks.
+	active []int64
+	marked []int64
+	// notifications is what the store reports as caught notifications.
+	notifications []string
+	// historyAid is the aid that the history reader was last called with.
+	historyAid string
+	// seq records "seed" and "open" in call order.
+	seq []string
+	// last is the store that Open returned last, to inspect its clock reads.
+	last *fakeStore
 }
 
-func (b *fakeBackend) Name() string                                 { return b.name }
-func (b *fakeBackend) Injectable(f FaultSpec) bool                  { return b.injectable }
-func (b *fakeBackend) Seed(context.Context, []map[string]any) error { return nil }
+func (b *fakeBackend) Name() string                { return b.name }
+func (b *fakeBackend) Injectable(f FaultSpec) bool { return b.injectable }
+
+func (b *fakeBackend) Seed(context.Context, []map[string]any) error {
+	atomic.AddInt32(&b.seedCalls, 1)
+	b.seq = append(b.seq, "seed")
+	return b.seedErr
+}
 
 func (b *fakeBackend) Open(ctx context.Context, cfg StoreConfig, inj Injection) (Store, error) {
 	atomic.AddInt32(&b.opens, 1)
+	b.seq = append(b.seq, "open")
+	inj.Hooks.ProvideHistory(func(aid string) (testhook.History, error) {
+		b.historyAid = aid
+		return testhook.History{Active: b.active, Marked: b.marked}, nil
+	})
 	if b.openErr != nil {
 		return nil, b.openErr
 	}
-	return &fakeStore{b: b, inj: inj}, nil
+	st := &fakeStore{b: b, inj: inj, openTime: inj.Hooks.Now()}
+	b.last = st
+	return st, nil
 }
 
 type fakeStore struct {
-	b      *fakeBackend
-	inj    Injection
-	events []Event
+	b        *fakeBackend
+	inj      Injection
+	events   []Event
+	openTime time.Time
+	// times records each operation's clock read, after openTime.
+	times []time.Time
 }
 
 func (s *fakeStore) enter(name string) func() {
@@ -61,6 +93,7 @@ func (s *fakeStore) enter(name string) func() {
 
 func (s *fakeStore) PersistEvent(ctx context.Context, ev Event) error {
 	defer s.enter("persistEvent")()
+	s.times = append(s.times, s.inj.Hooks.Now())
 	if ev.SeqNr == 0 {
 		return &OperationError{Category: "contract-violation", Message: "seq_nr is zero"}
 	}
@@ -99,7 +132,7 @@ func (s *fakeStore) GetEventsByIDSinceSeqNr(ctx context.Context, aid AggregateID
 	return out, nil
 }
 
-func (s *fakeStore) Notifications() []string { return nil }
+func (s *fakeStore) Notifications() []string { return s.b.notifications }
 func (s *fakeStore) Close() error            { return nil }
 
 func fixtureEvent(seq int) string {
@@ -114,6 +147,14 @@ func fixtureEvent(seq int) string {
 
 func step(op, args, expect string) string {
 	return `{"op":"` + op + `","arguments":` + args + `,"expect":` + expect + `}`
+}
+
+func stepObserve(op, args, expect, observe string) string {
+	return `{"op":"` + op + `","arguments":` + args + `,"expect":` + expect + `,"observe":` + observe + `}`
+}
+
+func stepClock(op, args, expect string, epochSeconds int64) string {
+	return `{"op":"` + op + `","arguments":` + args + `,"expect":` + expect + `,"clock_epoch_seconds":` + strconv.FormatInt(epochSeconds, 10) + `}`
 }
 
 func scenarioBody(init string, faults string, steps ...string) string {
@@ -274,16 +315,6 @@ func TestRunScenario_NotRun(t *testing.T) {
 		assert.Nil(t, r.FailedStep)
 	})
 
-	t.Run("a backend the scenario does not list is not-applicable", func(t *testing.T) {
-		c := mkCase(t, scenarioBody("", "", persistOK))
-		c.Backends = []string{"dynamodb"}
-		b := &fakeBackend{name: "memory", injectable: true}
-		r := runScenario(ctx, c, "memory", b)
-		assert.Equal(t, StatusNotApplicable, r.Status)
-		assert.NotEmpty(t, r.Reason)
-		assert.Equal(t, int32(0), b.opens)
-	})
-
 	t.Run("milliseconds precision is not-applicable", func(t *testing.T) {
 		c := mkCase(t, scenarioBody("", "", persistOK))
 		c.TimePrecision = "milliseconds"
@@ -360,6 +391,186 @@ func TestRunScenario_FaultFiring(t *testing.T) {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+func TestRunScenario_Observe(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("a matching history and notifications observation succeeds", func(t *testing.T) {
+		b := &fakeBackend{name: "memory", injectable: true, active: []int64{1}, notifications: []string{"retention-failure"}}
+		s := stepObserve("persistEvent", `{"event":"e1"}`, `{"result":"success"}`,
+			`{"history":{"active":[1],"marked":[],"absent":[9]},"notifications":["retention-failure"]}`)
+		r := runScenario(ctx, mkCase(t, scenarioBody("", "", s)), "memory", b)
+		assert.Equal(t, StatusSuccess, r.Status, r.Reason)
+	})
+
+	t.Run("a history active mismatch fails the scenario", func(t *testing.T) {
+		b := &fakeBackend{name: "memory", injectable: true, active: []int64{1}}
+		s := stepObserve("persistEvent", `{"event":"e1"}`, `{"result":"success"}`,
+			`{"history":{"active":[2],"marked":[],"absent":[]}}`)
+		r := runScenario(ctx, mkCase(t, scenarioBody("", "", s)), "memory", b)
+		assert.Equal(t, StatusFailure, r.Status)
+		require.NotNil(t, r.FailedStep)
+		assert.Equal(t, 1, *r.FailedStep)
+	})
+
+	t.Run("a history marked mismatch fails the scenario", func(t *testing.T) {
+		b := &fakeBackend{name: "memory", injectable: true, active: []int64{1}, marked: []int64{2}}
+		s := stepObserve("persistEvent", `{"event":"e1"}`, `{"result":"success"}`,
+			`{"history":{"active":[1],"marked":[],"absent":[]}}`)
+		r := runScenario(ctx, mkCase(t, scenarioBody("", "", s)), "memory", b)
+		assert.Equal(t, StatusFailure, r.Status)
+	})
+
+	t.Run("an object-form marked observation compares its seq_nr", func(t *testing.T) {
+		b := &fakeBackend{name: "memory", injectable: true, marked: []int64{2}}
+		s := stepObserve("persistEvent", `{"event":"e1"}`, `{"result":"success"}`,
+			`{"history":{"active":[],"marked":[{"seq_nr":2,"ttl":4102444740}],"absent":[]}}`)
+		r := runScenario(ctx, mkCase(t, scenarioBody("", "", s)), "memory", b)
+		assert.Equal(t, StatusSuccess, r.Status, r.Reason)
+	})
+
+	t.Run("an object-form marked observation with a different seq_nr fails the scenario", func(t *testing.T) {
+		b := &fakeBackend{name: "memory", injectable: true, marked: []int64{3}}
+		s := stepObserve("persistEvent", `{"event":"e1"}`, `{"result":"success"}`,
+			`{"history":{"active":[],"marked":[{"seq_nr":2,"ttl":4102444740}],"absent":[]}}`)
+		r := runScenario(ctx, mkCase(t, scenarioBody("", "", s)), "memory", b)
+		assert.Equal(t, StatusFailure, r.Status)
+	})
+
+	t.Run("a seq_nr that must be absent but is still in the history fails the scenario", func(t *testing.T) {
+		b := &fakeBackend{name: "memory", injectable: true, active: []int64{1}, marked: []int64{2}}
+		s := stepObserve("persistEvent", `{"event":"e1"}`, `{"result":"success"}`,
+			`{"history":{"active":[1],"marked":[2],"absent":[2]}}`)
+		r := runScenario(ctx, mkCase(t, scenarioBody("", "", s)), "memory", b)
+		assert.Equal(t, StatusFailure, r.Status)
+	})
+
+	t.Run("a notifications mismatch fails the scenario", func(t *testing.T) {
+		b := &fakeBackend{name: "memory", injectable: true, notifications: []string{"other"}}
+		s := stepObserve("persistEvent", `{"event":"e1"}`, `{"result":"success"}`,
+			`{"notifications":["retention-failure"]}`)
+		r := runScenario(ctx, mkCase(t, scenarioBody("", "", s)), "memory", b)
+		assert.Equal(t, StatusFailure, r.Status)
+	})
+
+	t.Run("the history is read for the aggregate id of the step", func(t *testing.T) {
+		// The step persists event e1, whose aggregate id is the pair Order/1.
+		b := &fakeBackend{name: "memory", injectable: true, active: []int64{1}}
+		s := stepObserve("persistEvent", `{"event":"e1"}`, `{"result":"success"}`,
+			`{"history":{"active":[1],"marked":[],"absent":[]}}`)
+		r := runScenario(ctx, mkCase(t, scenarioBody("", "", s)), "memory", b)
+		assert.Equal(t, StatusSuccess, r.Status, r.Reason)
+		assert.Equal(t, "Order-1", b.historyAid)
+	})
+}
+
+func TestRunScenario_Clock(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("the scenario clock and each step clock reach the store", func(t *testing.T) {
+		const scenarioClock = int64(4102444800) // 2100-01-01T00:00:00Z
+		const stepClock = int64(5000000000)     // 2128-06-11T13:33:20Z
+		clock := `"clock":{"epoch_seconds":` + strconv.FormatInt(scenarioClock, 10) + `},`
+		body := scenarioBodyClock(clock, persistOK, stepClockStep(stepClock))
+		b := &fakeBackend{name: "memory", injectable: true}
+		r := runScenario(ctx, mkCase(t, body), "memory", b)
+		require.Equal(t, StatusSuccess, r.Status, r.Reason)
+		require.NotNil(t, b.last)
+		assert.Equal(t, time.Unix(scenarioClock, 0).UTC(), b.last.openTime)
+		require.Len(t, b.last.times, 2)
+		assert.Equal(t, time.Unix(scenarioClock, 0).UTC(), b.last.times[0])
+		assert.Equal(t, time.Unix(stepClock, 0).UTC(), b.last.times[1])
+	})
+
+	t.Run("a step clock without a scenario clock reaches the store for that operation", func(t *testing.T) {
+		const stepClock = int64(5000000000) // 2128-06-11T13:33:20Z
+		b := &fakeBackend{name: "memory", injectable: true}
+		r := runScenario(ctx, mkCase(t, scenarioBody("", "", stepClockStep(stepClock))), "memory", b)
+		require.Equal(t, StatusSuccess, r.Status, r.Reason)
+		require.NotNil(t, b.last)
+		require.Len(t, b.last.times, 1)
+		assert.Equal(t, time.Unix(stepClock, 0).UTC(), b.last.times[0])
+	})
+
+	t.Run("a scenario with no clock leaves the real time in place", func(t *testing.T) {
+		b := &fakeBackend{name: "memory", injectable: true}
+		before := time.Now().Add(-time.Second)
+		r := runScenario(ctx, mkCase(t, scenarioBody("", "", persistOK)), "memory", b)
+		require.Equal(t, StatusSuccess, r.Status, r.Reason)
+		require.NotNil(t, b.last)
+		assert.True(t, b.last.openTime.After(before), "open time should be close to now")
+	})
+}
+
+func TestRunScenario_UnwiredObservation(t *testing.T) {
+	ctx := context.Background()
+
+	for _, key := range []string{"items", "requests", "no_requests_in_phases", "request_count", "minimum_request_count"} {
+		t.Run("an unwired "+key+" observation leaves the scenario unverified and the store unopened", func(t *testing.T) {
+			s := stepObserve("persistEvent", `{"event":"e1"}`, `{"result":"success"}`,
+				`{"`+key+`":[]}`)
+			b := &fakeBackend{name: "memory", injectable: true}
+			r := runScenario(ctx, mkCase(t, scenarioBody("", "", s)), "memory", b)
+			assert.Equal(t, StatusUnverified, r.Status)
+			assert.NotEmpty(t, r.Reason)
+			assert.Equal(t, int32(0), b.opens)
+		})
+	}
+}
+
+func TestRunScenario_SeedAndMemoryTTL(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("the seed runs before the store is created", func(t *testing.T) {
+		body := scenarioBodySeed(`"seed":{"items":[{"table":"journal","attributes":{}}]},`, persistOK)
+		b := &fakeBackend{name: "memory", injectable: true}
+		r := runScenario(ctx, mkCase(t, body), "memory", b)
+		require.Equal(t, StatusSuccess, r.Status, r.Reason)
+		assert.Equal(t, int32(1), b.seedCalls)
+		assert.Equal(t, []string{"seed", "open"}, b.seq)
+	})
+
+	t.Run("a seed failure fails at step 0 without opening the store", func(t *testing.T) {
+		body := scenarioBodySeed(`"seed":{"items":[{"table":"journal","attributes":{}}]},`, persistOK)
+		b := &fakeBackend{name: "memory", injectable: true, seedErr: errors.New("seed rejected")}
+		r := runScenario(ctx, mkCase(t, body), "memory", b)
+		assert.Equal(t, StatusFailure, r.Status)
+		require.NotNil(t, r.FailedStep)
+		assert.Equal(t, 0, *r.FailedStep)
+		assert.Equal(t, int32(0), b.opens)
+	})
+
+	t.Run("a scenario without seed does not seed", func(t *testing.T) {
+		b := &fakeBackend{name: "memory", injectable: true}
+		r := runScenario(ctx, mkCase(t, scenarioBody("", "", persistOK)), "memory", b)
+		require.Equal(t, StatusSuccess, r.Status, r.Reason)
+		assert.Equal(t, int32(0), b.seedCalls)
+		assert.Equal(t, []string{"open"}, b.seq)
+	})
+
+	t.Run("a scenario that requires ttl is not-applicable on memory", func(t *testing.T) {
+		c := mkCase(t, scenarioBody("", "", persistOK))
+		c.Requires = []string{"ttl"}
+		b := &fakeBackend{name: "memory", injectable: true}
+		r := runScenario(ctx, c, "memory", b)
+		assert.Equal(t, StatusNotApplicable, r.Status)
+		assert.Equal(t, int32(0), b.opens)
+	})
+}
+
+func stepClockStep(epochSeconds int64) string {
+	return stepClock("persistEvent", `{"event":"e2"}`, `{"result":"success"}`, epochSeconds)
+}
+
+func scenarioBodyClock(clock string, steps ...string) string {
+	body := scenarioBody("", "", steps...)
+	return strings.Replace(body, `"steps":[`, clock+`"steps":[`, 1)
+}
+
+func scenarioBodySeed(seed string, steps ...string) string {
+	body := scenarioBody("", "", steps...)
+	return strings.Replace(body, `"steps":[`, seed+`"steps":[`, 1)
+}
 
 func TestRunScenarioCases_NoBackend(t *testing.T) {
 	d, err := LoadData(dataRoot())

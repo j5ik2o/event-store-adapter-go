@@ -16,11 +16,10 @@ import (
 )
 
 const (
-	reasonNoBackend        = "保存先の境界が未接続のため、場面を実行していない（設計 7.2 の4番以降）"
-	reasonUnwired          = "DynamoDB の観測（items・requests・要求数）の手段がまだなく、場面を検証できない（設計 7.2 の4番・10番）"
-	reasonNotInjectable    = "保存先が差し込めない障害を持つため、場面を検証できない（設計 5.4）"
-	reasonBackendNotListed = "場面の backends に、この保存先がない"
-	reasonMemoryTTL        = "TTL 方式を要求する場面は DynamoDB だけで、メモリでは対象外（設計 5.2 の1）"
+	reasonNoBackend     = "保存先の境界が未接続のため、場面を実行していない（設計 7.2 の4番以降）"
+	reasonUnwired       = "DynamoDB の観測（items・requests・要求数）の手段がまだなく、場面を検証できない（設計 7.2 の4番・10番）"
+	reasonNotInjectable = "保存先が差し込めない障害を持つため、場面を検証できない（設計 5.4）"
+	reasonMemoryTTL     = "TTL 方式を要求する場面は DynamoDB だけで、メモリでは対象外（設計 5.2 の1）"
 )
 
 // runScenarioCases runs every scenario on every backend it lists. backends maps a backend name
@@ -41,22 +40,14 @@ func runScenario(ctx context.Context, c ScenarioCase, backend string, b Backend)
 	res := CaseResult{ID: c.ID, Rules: nonNil(c.Rules), Backend: backend}
 	set := func(s Status, reason string) CaseResult { res.Status, res.Reason = s, reason; return res }
 
-	listed := false
-	for _, n := range c.Backends {
-		listed = listed || n == backend
-	}
 	plan := c.Plan
 	switch {
-	case !listed:
-		return set(StatusNotApplicable, reasonBackendNotListed)
 	case c.TimePrecision == "milliseconds":
 		return set(StatusNotApplicable, reasonMillis)
 	case backend == "memory" && contains(c.Requires, "ttl"):
 		return set(StatusNotApplicable, reasonMemoryTTL)
 	case b == nil:
 		return set(StatusUnverified, reasonNoBackend)
-	case plan == nil:
-		return set(StatusFailure, "場面が解釈されていない（Plan が nil）")
 	case plan.UnwiredObservation != "":
 		return set(StatusUnverified, reasonUnwired+": "+plan.UnwiredObservation)
 	}
@@ -71,14 +62,18 @@ func runScenario(ctx context.Context, c ScenarioCase, backend string, b Backend)
 	hooks := testhook.New()
 	hooks.SetSleeper(func(time.Duration) {})
 	var clock atomic.Int64
-	if plan.ClockStart != nil {
-		clock.Store(*plan.ClockStart)
-		hooks.SetClock(func() time.Time { return time.Unix(clock.Load(), 0).UTC() })
-	}
+	needsClock := plan.ClockStart != nil
 	for _, s := range plan.Steps {
 		if s.ClockEpochSeconds != nil {
-			hooks.SetClock(func() time.Time { return time.Unix(clock.Load(), 0).UTC() })
+			needsClock = true
+			break
 		}
+	}
+	if needsClock {
+		if plan.ClockStart != nil {
+			clock.Store(*plan.ClockStart)
+		}
+		hooks.SetClock(func() time.Time { return time.Unix(clock.Load(), 0).UTC() })
 	}
 	registerHookFaults(hooks, faults)
 
