@@ -49,6 +49,7 @@ type boundaryCall struct {
 	name  string
 	ctx   context.Context
 	id    eventstore.AggregateID
+	aid   string
 	since eventstore.SeqNr
 }
 
@@ -90,12 +91,20 @@ func (b *observedBoundary) PersistEventAndSnapshot(ctx context.Context, event ev
 }
 
 func (b *observedBoundary) GetLatestSnapshotByID(ctx context.Context, id eventstore.AggregateID) (*eventstore.SnapshotRead[[]byte], error) {
-	b.calls = append(b.calls, boundaryCall{name: "GetLatestSnapshotByID", ctx: ctx, id: id})
+	aid, err := eventstore.AidString(id)
+	b.calls = append(b.calls, boundaryCall{name: "GetLatestSnapshotByID", ctx: ctx, id: id, aid: aid})
+	if err != nil {
+		return nil, err
+	}
 	return b.snapshotResponse, nil
 }
 
 func (b *observedBoundary) GetEventsByIDSinceSeqNr(ctx context.Context, id eventstore.AggregateID, since eventstore.SeqNr) ([]eventstore.EventEnvelope[[]byte], error) {
-	b.calls = append(b.calls, boundaryCall{name: "GetEventsByIDSinceSeqNr", ctx: ctx, id: id, since: since})
+	aid, err := eventstore.AidString(id)
+	b.calls = append(b.calls, boundaryCall{name: "GetEventsByIDSinceSeqNr", ctx: ctx, id: id, aid: aid, since: since})
+	if err != nil {
+		return nil, err
+	}
 	return b.eventsResponse, nil
 }
 
@@ -194,10 +203,225 @@ func TestOperationEntryExternalDomainAndOptionsRoundTrip(t *testing.T) {
 	assert.Equal(t, []boundaryCall{
 		{name: "PersistEvent", ctx: ctx},
 		{name: "PersistEventAndSnapshot", ctx: ctx},
-		{name: "GetLatestSnapshotByID", ctx: ctx, id: id},
-		{name: "GetEventsByIDSinceSeqNr", ctx: ctx, id: id, since: 0},
+		{name: "GetLatestSnapshotByID", ctx: ctx, id: id, aid: "Order-item-1"},
+		{name: "GetEventsByIDSinceSeqNr", ctx: ctx, id: id, aid: "Order-item-1", since: 0},
 	}, boundary.calls)
 	assert.Zero(t, notifications, "the common entry does not run retention")
+}
+
+type changingAggregateID struct {
+	typeName      string
+	value         string
+	laterTypeName string
+	laterValue    string
+	typeNameCalls int
+	valueCalls    int
+}
+
+func (id *changingAggregateID) TypeName() string {
+	id.typeNameCalls++
+	if id.typeNameCalls == 1 {
+		return id.typeName
+	}
+	return id.laterTypeName
+}
+
+func (id *changingAggregateID) Value() string {
+	id.valueCalls++
+	if id.valueCalls == 1 {
+		return id.value
+	}
+	return id.laterValue
+}
+
+func TestOperationEntryReadIDsRemainValidated(t *testing.T) {
+	for _, tc := range []struct {
+		name, typeName, value, laterTypeName, laterValue string
+	}{
+		{"changed key", "Order", "item-1", "Other", "item-2"},
+		{"later invalid type", "Order", "item-1", "Other-Type", "item-2"},
+		{"empty type", "", "item-1", "Other", "item-2"},
+		{"empty value", "Order", "", "Other", "item-2"},
+		{"empty parts", "", "", "Other", "item-2"},
+	} {
+		for _, operation := range []string{"GetLatestSnapshotByID", "GetEventsByIDSinceSeqNr"} {
+			t.Run(tc.name+"/"+operation, func(t *testing.T) {
+				id := &changingAggregateID{
+					typeName: tc.typeName, value: tc.value,
+					laterTypeName: tc.laterTypeName, laterValue: tc.laterValue,
+				}
+				boundary := &observedBoundary{}
+				serializer := eventstore.NewJSONSerializer[string]()
+				store, err := eventstore.NewOperationEntry(serializer, serializer, boundary.open)
+				require.NoError(t, err)
+				type contextKey struct{}
+				ctx := context.WithValue(context.Background(), contextKey{}, "read context")
+				var since eventstore.SeqNr
+
+				if operation == "GetLatestSnapshotByID" {
+					_, err = store.GetLatestSnapshotByID(ctx, id)
+				} else {
+					since = 7
+					_, err = store.GetEventsByIDSinceSeqNr(ctx, id, since)
+				}
+
+				require.Len(t, boundary.calls, 1)
+				call := boundary.calls[0]
+				t.Logf("boundary calls=%d aid=%q since=%d TypeName calls=%d Value calls=%d error=%v",
+					len(boundary.calls), call.aid, call.since, id.typeNameCalls, id.valueCalls, err)
+				assert.NoError(t, err)
+				assert.Equal(t, operation, call.name)
+				assert.Equal(t, ctx, call.ctx)
+				assert.Equal(t, since, call.since)
+				assert.Equal(t, tc.typeName+"-"+tc.value, call.aid)
+				assert.Equal(t, 1, id.typeNameCalls)
+				assert.Equal(t, 1, id.valueCalls)
+				// Reusing the received ID must still yield the originally validated parts.
+				assert.Equal(t, tc.typeName, call.id.TypeName())
+				assert.Equal(t, tc.value, call.id.Value())
+				assert.Equal(t, 1, id.typeNameCalls)
+				assert.Equal(t, 1, id.valueCalls)
+			})
+		}
+	}
+}
+
+// bufferSerializer reuses one output buffer and changes its deserialization input.
+type bufferSerializer struct {
+	scratch    [64]byte
+	serialized []string
+	restored   []string
+}
+
+func (s *bufferSerializer) Serialize(value string) ([]byte, error) {
+	s.serialized = append(s.serialized, value)
+	data := s.scratch[:len(value)]
+	copy(data, value)
+	return data, nil
+}
+
+func (s *bufferSerializer) Deserialize(data []byte) (string, error) {
+	value := string(data)
+	s.restored = append(s.restored, value)
+	for i := range data {
+		data[i] = '!'
+	}
+	return value, nil
+}
+
+func TestOperationEntryCopiesSerializedBytes(t *testing.T) {
+	serializer := &bufferSerializer{}
+	boundary := &observedBoundary{}
+	store, err := eventstore.NewOperationEntry(serializer, serializer, boundary.open)
+	require.NoError(t, err)
+	id, err := eventstore.NewAggregateID("Order", "item-1")
+	require.NoError(t, err)
+	at := time.Date(2026, time.October, 9, 12, 34, 56, 123456789, time.FixedZone("domain", 9*60*60))
+	event, err := eventstore.NewEventEnvelope(id, 7, at, "event-before", eventstore.WithManifest(" event/型\x00 "))
+	require.NoError(t, err)
+	pairEvent, err := eventstore.NewEventEnvelope(id, 8, at.Add(time.Nanosecond), "event-pair", eventstore.WithManifest(" pair/イベント\x00 "))
+	require.NoError(t, err)
+	snapshot, err := eventstore.NewSnapshotEnvelope("state-pair", 8, eventstore.WithManifest(" snapshot/型\x00 "))
+	require.NoError(t, err)
+	laterEvent, err := eventstore.NewEventEnvelope(id, 9, at.Add(2*time.Nanosecond), "event-later-overwrites", eventstore.WithManifest(" later/型\x00 "))
+	require.NoError(t, err)
+	type contextKey struct{}
+	ctx := context.WithValue(context.Background(), contextKey{}, "write context")
+
+	require.NoError(t, store.PersistEvent(ctx, event))
+	require.Len(t, boundary.eventWrites, 1)
+	assert.Equal(t, []byte(event.Payload()), boundary.eventWrites[0].Payload())
+	require.NoError(t, store.PersistEventAndSnapshot(ctx, pairEvent, snapshot))
+	require.Len(t, boundary.eventWrites, 2)
+	require.Len(t, boundary.snapshotWrites, 1)
+	t.Logf("after pair: boundary calls=%d event bytes=%q, %q snapshot bytes=%q",
+		len(boundary.calls), boundary.eventWrites[0].Payload(), boundary.eventWrites[1].Payload(), boundary.snapshotWrites[0].Aggregate())
+	assert.Equal(t, []byte(event.Payload()), boundary.eventWrites[0].Payload())
+	assert.Equal(t, []byte(pairEvent.Payload()), boundary.eventWrites[1].Payload())
+	assert.Equal(t, []byte(snapshot.Aggregate()), boundary.snapshotWrites[0].Aggregate())
+
+	// The same entry, serializers and boundary survive another scratch-buffer overwrite.
+	require.NoError(t, store.PersistEvent(ctx, laterEvent))
+	require.Len(t, boundary.eventWrites, 3)
+	require.Len(t, boundary.snapshotWrites, 1)
+	t.Logf("after later write: boundary calls=%d event bytes=%q, %q, %q snapshot bytes=%q",
+		len(boundary.calls), boundary.eventWrites[0].Payload(), boundary.eventWrites[1].Payload(), boundary.eventWrites[2].Payload(), boundary.snapshotWrites[0].Aggregate())
+	for i, original := range []eventstore.EventEnvelope[string]{event, pairEvent, laterEvent} {
+		stored := boundary.eventWrites[i]
+		require.NoError(t, stored.Validate())
+		assert.Equal(t, original.AggregateID(), stored.AggregateID())
+		assert.Equal(t, original.SeqNr(), stored.SeqNr())
+		assert.Equal(t, original.OccurredAt(), stored.OccurredAt())
+		assert.Equal(t, original.Manifest(), stored.Manifest())
+		assert.Equal(t, []byte(original.Payload()), stored.Payload())
+	}
+	storedSnapshot := boundary.snapshotWrites[0]
+	require.NoError(t, storedSnapshot.Validate())
+	assert.Equal(t, snapshot.SeqNr(), storedSnapshot.SeqNr())
+	assert.Equal(t, snapshot.Manifest(), storedSnapshot.Manifest())
+	assert.Equal(t, []byte(snapshot.Aggregate()), storedSnapshot.Aggregate())
+	assert.Equal(t, []string{event.Payload(), pairEvent.Payload(), snapshot.Aggregate(), laterEvent.Payload()}, serializer.serialized)
+	assert.Equal(t, []boundaryCall{
+		{name: "PersistEvent", ctx: ctx},
+		{name: "PersistEventAndSnapshot", ctx: ctx},
+		{name: "PersistEvent", ctx: ctx},
+	}, boundary.calls)
+}
+
+func TestOperationEntryCopiesDeserializationInputs(t *testing.T) {
+	serializer := &bufferSerializer{}
+	boundary := &observedBoundary{}
+	store, err := eventstore.NewOperationEntry(serializer, serializer, boundary.open)
+	require.NoError(t, err)
+	id, err := eventstore.NewAggregateID("Order", "item-1")
+	require.NoError(t, err)
+	at := time.Unix(0, 123456789)
+	for i, payload := range []string{"first-event", "second-event"} {
+		event, err := eventstore.NewEventEnvelope(id, eventstore.SeqNr(7+i), at.Add(time.Duration(i)), []byte(payload), eventstore.WithManifest(" event/型\x00 "))
+		require.NoError(t, err)
+		boundary.eventsResponse = append(boundary.eventsResponse, event)
+	}
+	snapshot, err := eventstore.NewSnapshotEnvelope([]byte("state-pair"), 7, eventstore.WithManifest(" snapshot/型\x00 "))
+	require.NoError(t, err)
+	boundary.snapshotResponse = &eventstore.SnapshotRead[[]byte]{Snapshot: &snapshot, HeadSeqNr: 11}
+	type contextKey struct{}
+	ctx := context.WithValue(context.Background(), contextKey{}, "read context")
+
+	readSnapshot, err := store.GetLatestSnapshotByID(ctx, id)
+
+	require.NoError(t, err)
+	require.NotNil(t, readSnapshot)
+	require.NotNil(t, readSnapshot.Snapshot)
+	require.NoError(t, readSnapshot.Snapshot.Validate())
+	assert.Equal(t, eventstore.SeqNr(11), readSnapshot.HeadSeqNr)
+	assert.Equal(t, snapshot.SeqNr(), readSnapshot.Snapshot.SeqNr())
+	assert.Equal(t, snapshot.Manifest(), readSnapshot.Snapshot.Manifest())
+	assert.Equal(t, "state-pair", readSnapshot.Snapshot.Aggregate())
+	assert.Equal(t, []byte("state-pair"), boundary.snapshotResponse.Snapshot.Aggregate())
+
+	readEvents, err := store.GetEventsByIDSinceSeqNr(ctx, id, 7)
+
+	require.NoError(t, err)
+	require.Len(t, readEvents, 2)
+	for i, want := range []string{"first-event", "second-event"} {
+		original := boundary.eventsResponse[i]
+		restored := readEvents[i]
+		require.NoError(t, restored.Validate())
+		assert.Equal(t, original.AggregateID(), restored.AggregateID())
+		assert.Equal(t, original.SeqNr(), restored.SeqNr())
+		assert.Equal(t, original.OccurredAt(), restored.OccurredAt())
+		assert.Equal(t, original.Manifest(), restored.Manifest())
+		assert.Equal(t, want, restored.Payload())
+		assert.Equal(t, []byte(want), original.Payload())
+	}
+	t.Logf("after reads: boundary calls=%d event bytes=%q, %q snapshot bytes=%q",
+		len(boundary.calls), boundary.eventsResponse[0].Payload(), boundary.eventsResponse[1].Payload(), boundary.snapshotResponse.Snapshot.Aggregate())
+	assert.Equal(t, []byte("state-pair"), boundary.snapshotResponse.Snapshot.Aggregate())
+	assert.Equal(t, []string{"state-pair", "first-event", "second-event"}, serializer.restored)
+	assert.Equal(t, []boundaryCall{
+		{name: "GetLatestSnapshotByID", ctx: ctx, id: id, aid: "Order-item-1"},
+		{name: "GetEventsByIDSinceSeqNr", ctx: ctx, id: id, aid: "Order-item-1", since: 7},
+	}, boundary.calls)
 }
 
 func TestOperationEntrySnapshotAbsenceRemainsDistinct(t *testing.T) {

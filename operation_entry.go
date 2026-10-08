@@ -1,9 +1,11 @@
 package eventstore
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 )
 
 // NewOperationEntry connects payload serializers to a byte-oriented storage boundary.
@@ -74,6 +76,7 @@ func (s *operationEntry[E, A]) PersistEventAndSnapshot(ctx context.Context, even
 	if err != nil {
 		return classifySerializationError(err)
 	}
+	data = bytes.Clone(data)
 	storedSnapshot := SnapshotEnvelope[[]byte]{
 		aggregate:   data,
 		seqNr:       snapshot.seqNr,
@@ -84,10 +87,13 @@ func (s *operationEntry[E, A]) PersistEventAndSnapshot(ctx context.Context, even
 }
 
 func (s *operationEntry[E, A]) GetLatestSnapshotByID(ctx context.Context, id AggregateID) (*SnapshotRead[A], error) {
-	if _, err := AidString(id); err != nil {
+	aid, err := AidString(id)
+	if err != nil {
 		return nil, err
 	}
-	stored, err := s.boundary.GetLatestSnapshotByID(ctx, id)
+	typeName, value, _ := strings.Cut(aid, "-")
+	validatedID := aggregateID{typeName: typeName, value: value}
+	stored, err := s.boundary.GetLatestSnapshotByID(ctx, validatedID)
 	if err != nil {
 		return nil, classifyStorageError(err)
 	}
@@ -96,7 +102,7 @@ func (s *operationEntry[E, A]) GetLatestSnapshotByID(ctx context.Context, id Agg
 	}
 	result := &SnapshotRead[A]{HeadSeqNr: stored.HeadSeqNr}
 	if stored.Snapshot != nil {
-		aggregate, err := s.snapshotSerializer.Deserialize(stored.Snapshot.aggregate)
+		aggregate, err := s.snapshotSerializer.Deserialize(bytes.Clone(stored.Snapshot.aggregate))
 		if err != nil {
 			return nil, classifySerializationError(err)
 		}
@@ -111,13 +117,16 @@ func (s *operationEntry[E, A]) GetLatestSnapshotByID(ctx context.Context, id Agg
 }
 
 func (s *operationEntry[E, A]) GetEventsByIDSinceSeqNr(ctx context.Context, id AggregateID, seqNr SeqNr) ([]EventEnvelope[E], error) {
-	if _, err := AidString(id); err != nil {
+	aid, err := AidString(id)
+	if err != nil {
 		return nil, err
 	}
 	if err := seqNr.Validate(); err != nil {
 		return nil, err
 	}
-	stored, err := s.boundary.GetEventsByIDSinceSeqNr(ctx, id, seqNr)
+	typeName, value, _ := strings.Cut(aid, "-")
+	validatedID := aggregateID{typeName: typeName, value: value}
+	stored, err := s.boundary.GetEventsByIDSinceSeqNr(ctx, validatedID, seqNr)
 	if err != nil {
 		return nil, classifyStorageError(err)
 	}
@@ -126,7 +135,7 @@ func (s *operationEntry[E, A]) GetEventsByIDSinceSeqNr(ctx context.Context, id A
 	}
 	result := make([]EventEnvelope[E], len(stored))
 	for i, event := range stored {
-		payload, err := s.eventSerializer.Deserialize(event.payload)
+		payload, err := s.eventSerializer.Deserialize(bytes.Clone(event.payload))
 		if err != nil {
 			return nil, classifySerializationError(err)
 		}
@@ -146,6 +155,7 @@ func (s *operationEntry[E, A]) serializeEvent(event EventEnvelope[E]) (EventEnve
 	if err != nil {
 		return EventEnvelope[[]byte]{}, classifySerializationError(err)
 	}
+	data = bytes.Clone(data)
 	return EventEnvelope[[]byte]{
 		aggregateID: event.aggregateID,
 		seqNr:       event.seqNr,
