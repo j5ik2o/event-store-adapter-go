@@ -74,6 +74,37 @@ func TestRunValueCaseRejectsWrongExpectations(t *testing.T) {
 	}
 }
 
+func TestRunEventSequenceValues(t *testing.T) {
+	for _, tc := range []struct {
+		n    int64
+		rule string
+	}{
+		{1, ""}, {9007199254740991, ""}, {0, "W-6"}, {-1, "T-9"}, {9007199254740992, "T-9"},
+	} {
+		t.Run(fmt.Sprint(tc.n), func(t *testing.T) {
+			expect := map[string]any{"value": json.Number(fmt.Sprint(tc.n))}
+			if tc.rule != "" {
+				expect = map[string]any{"error": map[string]any{
+					"category": "contract-violation", "rule": tc.rule,
+					"message": map[string]any{"must_contain": []any{fmt.Sprintf("seq_nr=%d", tc.n)}, "must_not_contain": []any{}},
+				}}
+			}
+			c := ValueCase{ID: "event-sequence", Operation: "validateSeqNr",
+				Input: ValueInput{SeqNr: big.NewInt(tc.n), Raw: map[string]any{"context": "event"}}, Expect: expect}
+			res := runValueCase(c)
+			assert.Equal(t, StatusSuccess, res.Status, res.Reason)
+			actual := res.Actual.(map[string]any)
+			if tc.rule == "" {
+				assert.Equal(t, json.Number(fmt.Sprint(tc.n)), actual["value"])
+			} else {
+				actualError := actual["error"].(map[string]any)
+				assert.Equal(t, "contract-violation", actualError["category"])
+				assert.Contains(t, actualError["message"], tc.rule)
+			}
+		})
+	}
+}
+
 func TestCoreOperationErrorClassification(t *testing.T) {
 	for _, tc := range []struct {
 		err      error
