@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
 )
@@ -54,7 +55,14 @@ func runValueCase(c ValueCase) CaseResult {
 		case "value":
 			err = n.Validate()
 		case "event":
-			err = n.ValidateAsEventSeqNr()
+			var event eventstore.EventEnvelope[map[string]any]
+			event, err = eventstore.NewEventEnvelope(
+				valueAggregateID{parts: AggregateIDArg{TypeName: "ConformanceSeqNr", Value: c.ID}},
+				n, time.Unix(0, 123000000).UTC(), map[string]any{},
+			)
+			if err == nil {
+				value = json.Number(strconv.FormatInt(int64(event.SeqNr()), 10))
+			}
 		default:
 			err = fmt.Errorf("unsupported seq_nr context %v", c.Input.Raw["context"])
 		}
