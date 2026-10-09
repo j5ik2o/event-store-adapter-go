@@ -128,7 +128,7 @@ func TestNewStoreOwnsSettingsAcrossCalls(t *testing.T) {
 	require.NoError(t, err)
 	assert.Zero(t, originalHandlerCalls)
 	first := newTestEvent(t, "settings", 1, []byte("first"))
-	require.NoError(t, store.persistEvent(first))
+	require.NoError(t, store.persistEvent(context.Background(), first))
 	headBefore, journalBefore := store.observe(first.AggregateID())
 
 	count = 0
@@ -138,7 +138,7 @@ func TestNewStoreOwnsSettingsAcrossCalls(t *testing.T) {
 	applied.TTLGraceSeconds = -1
 	applied.RetentionFailureHandler = func(context.Context, error) { replacementHandlerCalls++ }
 	second := newTestEvent(t, "settings", 2, []byte("second"))
-	require.NoError(t, store.persistEvent(second))
+	require.NoError(t, store.persistEvent(context.Background(), second))
 
 	require.NotNil(t, store.settings.RetentionCount)
 	assert.Equal(t, 3, *store.settings.RetentionCount)
@@ -166,11 +166,11 @@ func TestNewStoreSharingAndIsolation(t *testing.T) {
 	first := newTestEvent(t, "shared", 1, []byte("first"))
 	second := newTestEvent(t, "shared", 2, []byte("second"))
 
-	require.NoError(t, firstCaller.persistEvent(first))
-	require.NoError(t, secondCaller.persistEvent(second))
+	require.NoError(t, firstCaller.persistEvent(context.Background(), first))
+	require.NoError(t, secondCaller.persistEvent(context.Background(), second))
 	headBefore, journalBefore := firstStore.observe(first.AggregateID())
 	isolated := newTestEvent(t, "shared", 1, []byte("isolated"))
-	require.NoError(t, secondStore.persistEvent(isolated))
+	require.NoError(t, secondStore.persistEvent(context.Background(), isolated))
 
 	head, journal := firstStore.observe(first.AggregateID())
 	require.NotNil(t, head)

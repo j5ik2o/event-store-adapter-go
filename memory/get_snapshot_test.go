@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -46,25 +47,25 @@ func TestGetLatestSnapshotTracksHeadAndCurrent(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, missing)
 
-	require.NoError(t, store.persistEvent(newTestEvent(t, "latest", 1, []byte("first"))))
+	require.NoError(t, store.persistEvent(context.Background(), newTestEvent(t, "latest", 1, []byte("first"))))
 	headOnly, err := store.getLatestSnapshotByID(id)
 	require.NoError(t, err)
 	requireLatestSnapshot(t, headOnly, 1, nil)
 
 	second := newTestSnapshot(t, 2, []byte{255, 0, 13, 10})
-	require.NoError(t, store.persistEventAndSnapshot(newTestEvent(t, "latest", 2, []byte("second")), second))
+	require.NoError(t, store.persistEventAndSnapshot(context.Background(), newTestEvent(t, "latest", 2, []byte("second")), second))
 	pair, err := store.getLatestSnapshotByID(id)
 	require.NoError(t, err)
 	requireLatestSnapshot(t, pair, 2, &second)
 
-	require.NoError(t, store.persistEvent(newTestEvent(t, "latest", 3, []byte("third"))))
+	require.NoError(t, store.persistEvent(context.Background(), newTestEvent(t, "latest", 3, []byte("third"))))
 	advanced, err := store.getLatestSnapshotByID(id)
 	require.NoError(t, err)
 	requireLatestSnapshot(t, advanced, 3, &second)
 
 	fourth, err := eventstore.NewSnapshotEnvelope([]byte("fourth\x00state"), 4)
 	require.NoError(t, err)
-	require.NoError(t, store.persistEventAndSnapshot(newTestEvent(t, "latest", 4, []byte("fourth")), fourth))
+	require.NoError(t, store.persistEventAndSnapshot(context.Background(), newTestEvent(t, "latest", 4, []byte("fourth")), fourth))
 	latest, err := store.getLatestSnapshotByID(id)
 	require.NoError(t, err)
 	requireLatestSnapshot(t, latest, 4, &fourth)
@@ -90,7 +91,7 @@ func TestGetLatestSnapshotUsesExactAggregateID(t *testing.T) {
 		snapshot, err := eventstore.NewSnapshotEnvelope([]byte{255, 0, byte(i)}, 1,
 			eventstore.WithManifest(fmt.Sprintf("snapshot/%d", i)))
 		require.NoError(t, err)
-		require.NoError(t, store.persistEventAndSnapshot(event, snapshot))
+		require.NoError(t, store.persistEventAndSnapshot(context.Background(), event, snapshot))
 		snapshots = append(snapshots, snapshot)
 	}
 
@@ -154,12 +155,12 @@ func TestGetLatestSnapshotFixesAggregateIDBeforeWaiting(t *testing.T) {
 	fixedID, err := eventstore.NewAggregateID(id.typeName, id.value)
 	require.NoError(t, err)
 	snapshot := newTestSnapshot(t, 1, []byte("original-state"))
-	require.NoError(t, store.persistEventAndSnapshot(newTestEvent(t, "fixed-with-hyphens", 1, []byte("original")), snapshot))
+	require.NoError(t, store.persistEventAndSnapshot(context.Background(), newTestEvent(t, "fixed-with-hyphens", 1, []byte("original")), snapshot))
 	otherID, err := eventstore.NewAggregateID("Changed", "caller")
 	require.NoError(t, err)
 	otherEvent, err := eventstore.NewEventEnvelope(otherID, 1, time.Unix(0, 123456789), []byte("other"))
 	require.NoError(t, err)
-	require.NoError(t, store.persistEventAndSnapshot(otherEvent, newTestSnapshot(t, 1, []byte("other-state"))))
+	require.NoError(t, store.persistEventAndSnapshot(context.Background(), otherEvent, newTestSnapshot(t, 1, []byte("other-state"))))
 	store.mu.Lock()
 	unlock := sync.OnceFunc(store.mu.Unlock)
 	result := make(chan snapshotReadResult, 1)
@@ -203,12 +204,12 @@ func TestGetLatestSnapshotSharesStoreAndIsolatesSeparateStores(t *testing.T) {
 	id, err := eventstore.NewAggregateID("Account", "shared-snapshot")
 	require.NoError(t, err)
 	snapshot := newTestSnapshot(t, 1, []byte("shared-state"))
-	require.NoError(t, firstCaller.persistEventAndSnapshot(newTestEvent(t, "shared-snapshot", 1, []byte("first")), snapshot))
+	require.NoError(t, firstCaller.persistEventAndSnapshot(context.Background(), newTestEvent(t, "shared-snapshot", 1, []byte("first")), snapshot))
 	before, err := secondCaller.getLatestSnapshotByID(id)
 	require.NoError(t, err)
 	requireLatestSnapshot(t, before, 1, &snapshot)
 
-	require.NoError(t, secondCaller.persistEvent(newTestEvent(t, "shared-snapshot", 2, []byte("second"))))
+	require.NoError(t, secondCaller.persistEvent(context.Background(), newTestEvent(t, "shared-snapshot", 2, []byte("second"))))
 	after, err := firstCaller.getLatestSnapshotByID(id)
 	require.NoError(t, err)
 	requireLatestSnapshot(t, after, 2, &snapshot)
@@ -218,7 +219,7 @@ func TestGetLatestSnapshotSharesStoreAndIsolatesSeparateStores(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, empty)
 	isolated := newTestSnapshot(t, 1, []byte("isolated-state"))
-	require.NoError(t, separate.persistEventAndSnapshot(newTestEvent(t, "shared-snapshot", 1, []byte("isolated")), isolated))
+	require.NoError(t, separate.persistEventAndSnapshot(context.Background(), newTestEvent(t, "shared-snapshot", 1, []byte("isolated")), isolated))
 	other, err := separate.getLatestSnapshotByID(id)
 	require.NoError(t, err)
 	requireLatestSnapshot(t, other, 1, &isolated)
@@ -237,7 +238,7 @@ func TestGetLatestSnapshotProtectsInputValues(t *testing.T) {
 	event := newTestEvent(t, "input-snapshot", 1, []byte("original-event"))
 	snapshot := newTestSnapshot(t, 1, []byte{255, 0, 13, 10})
 	expected := newTestSnapshot(t, 1, []byte{255, 0, 13, 10})
-	require.NoError(t, store.persistEventAndSnapshot(event, snapshot))
+	require.NoError(t, store.persistEventAndSnapshot(context.Background(), event, snapshot))
 	before, err := store.getLatestSnapshotByID(fixedID)
 	require.NoError(t, err)
 	requireLatestSnapshot(t, before, 1, &expected)
@@ -262,8 +263,8 @@ func TestGetLatestSnapshotProtectsReturnedValues(t *testing.T) {
 	id, err := eventstore.NewAggregateID("Account", "returned-snapshot")
 	require.NoError(t, err)
 	snapshot := newTestSnapshot(t, 1, []byte{255, 0, 13, 10})
-	require.NoError(t, store.persistEventAndSnapshot(newTestEvent(t, "returned-snapshot", 1, []byte("first")), snapshot))
-	require.NoError(t, store.persistEvent(newTestEvent(t, "returned-snapshot", 2, []byte("second"))))
+	require.NoError(t, store.persistEventAndSnapshot(context.Background(), newTestEvent(t, "returned-snapshot", 1, []byte("first")), snapshot))
+	require.NoError(t, store.persistEvent(context.Background(), newTestEvent(t, "returned-snapshot", 2, []byte("second"))))
 	first, err := store.getLatestSnapshotByID(id)
 	require.NoError(t, err)
 	requireLatestSnapshot(t, first, 2, &snapshot)
@@ -288,20 +289,20 @@ func TestGetLatestSnapshotPreservesNilAndEmptyBytes(t *testing.T) {
 	require.NoError(t, err)
 	id, err := eventstore.NewAggregateID("Account", "empty-snapshot")
 	require.NoError(t, err)
-	require.NoError(t, store.persistEvent(newTestEvent(t, "empty-snapshot", 1, nil)))
+	require.NoError(t, store.persistEvent(context.Background(), newTestEvent(t, "empty-snapshot", 1, nil)))
 	headOnly, err := store.getLatestSnapshotByID(id)
 	require.NoError(t, err)
 	requireLatestSnapshot(t, headOnly, 1, nil)
 
 	nilSnapshot := newTestSnapshot(t, 2, nil)
-	require.NoError(t, store.persistEventAndSnapshot(newTestEvent(t, "empty-snapshot", 2, nil), nilSnapshot))
+	require.NoError(t, store.persistEventAndSnapshot(context.Background(), newTestEvent(t, "empty-snapshot", 2, nil), nilSnapshot))
 	nilBytes, err := store.getLatestSnapshotByID(id)
 	require.NoError(t, err)
 	requireLatestSnapshot(t, nilBytes, 2, &nilSnapshot)
 	require.Nil(t, nilBytes.Snapshot.Aggregate())
 
 	emptySnapshot := newTestSnapshot(t, 3, []byte{})
-	require.NoError(t, store.persistEventAndSnapshot(newTestEvent(t, "empty-snapshot", 3, nil), emptySnapshot))
+	require.NoError(t, store.persistEventAndSnapshot(context.Background(), newTestEvent(t, "empty-snapshot", 3, nil), emptySnapshot))
 	emptyBytes, err := store.getLatestSnapshotByID(id)
 	require.NoError(t, err)
 	requireLatestSnapshot(t, emptyBytes, 3, &emptySnapshot)
@@ -316,8 +317,8 @@ func TestGetLatestSnapshotReadFailurePreservesRecordsAndReleasesLock(t *testing.
 	id, err := eventstore.NewAggregateID("Account", "failed-snapshot")
 	require.NoError(t, err)
 	snapshot := newTestSnapshot(t, 1, []byte("original-state"))
-	require.NoError(t, store.persistEventAndSnapshot(newTestEvent(t, "failed-snapshot", 1, []byte("first")), snapshot))
-	require.NoError(t, store.persistEvent(newTestEvent(t, "failed-snapshot", 2, []byte("second"))))
+	require.NoError(t, store.persistEventAndSnapshot(context.Background(), newTestEvent(t, "failed-snapshot", 1, []byte("first")), snapshot))
+	require.NoError(t, store.persistEvent(context.Background(), newTestEvent(t, "failed-snapshot", 2, []byte("second"))))
 	cause := &testhook.InjectedError{Phase: testhook.PhaseReadSnapshot, Message: "read failed"}
 	store.hooks = testhook.New()
 	reads := 0
@@ -366,7 +367,7 @@ func TestGetLatestSnapshotWaitsForPublicationAndHoldsStoreReadLock(t *testing.T)
 			previous := newTestSnapshot(t, 1, []byte("previous-state"))
 			seq := eventstore.SeqNr(1)
 			if tc.previous {
-				require.NoError(t, store.persistEventAndSnapshot(newTestEvent(t, "interleaved-snapshot", 1, []byte("previous")), previous))
+				require.NoError(t, store.persistEventAndSnapshot(context.Background(), newTestEvent(t, "interleaved-snapshot", 1, []byte("previous")), previous))
 				seq = 2
 			}
 			before, err := store.getLatestSnapshotByID(fixedID)
@@ -405,9 +406,9 @@ func TestGetLatestSnapshotWaitsForPublicationAndHoldsStoreReadLock(t *testing.T)
 			})
 			go func() {
 				if tc.pair {
-					writeResult <- store.persistEventAndSnapshot(event, snapshot)
+					writeResult <- store.persistEventAndSnapshot(context.Background(), event, snapshot)
 				} else {
-					writeResult <- store.persistEvent(event)
+					writeResult <- store.persistEvent(context.Background(), event)
 				}
 				close(writeDone)
 			}()

@@ -2,6 +2,7 @@ package memory
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -40,7 +41,7 @@ func TestPersistEventSequenceChecksPreserveRecords(t *testing.T) {
 			event := newTestEvent(t, "sequence", tc.seq, []byte(tc.name))
 			beforeHead, beforeJournal := store.observe(event.AggregateID())
 
-			err := store.persistEvent(event)
+			err := store.persistEvent(context.Background(), event)
 
 			if tc.kind == 0 {
 				require.NoError(t, err)
@@ -93,13 +94,13 @@ func TestPersistEventRejectsUnconstructedEnvelope(t *testing.T) {
 	store, err := NewStore()
 	require.NoError(t, err)
 	first := newTestEvent(t, "validated", 1, []byte("first"))
-	require.NoError(t, store.persistEvent(first))
+	require.NoError(t, store.persistEvent(context.Background(), first))
 	beforeHead, beforeJournal := store.observe(first.AggregateID())
 	store.hooks = testhook.New()
 	commitCalls := 0
 	store.hooks.OnFail(testhook.PhaseCommit, func(testhook.Point) error { commitCalls++; return nil })
 
-	err = store.persistEvent(eventstore.EventEnvelope[[]byte]{})
+	err = store.persistEvent(context.Background(), eventstore.EventEnvelope[[]byte]{})
 
 	requireKind(t, err, eventstore.KindContractViolation)
 	var violation *eventstore.ContractViolationError
@@ -120,7 +121,7 @@ func TestPersistEventPreparationFailureAndRetry(t *testing.T) {
 			store, err := NewStore()
 			require.NoError(t, err)
 			if seq == 2 {
-				require.NoError(t, store.persistEvent(newTestEvent(t, "failure", 1, []byte("first"))))
+				require.NoError(t, store.persistEvent(context.Background(), newTestEvent(t, "failure", 1, []byte("first"))))
 			}
 			event := newTestEvent(t, "failure", seq, []byte("candidate"))
 			beforeHead, beforeJournal := store.observe(event.AggregateID())
@@ -138,7 +139,7 @@ func TestPersistEventPreparationFailureAndRetry(t *testing.T) {
 				return nil
 			})
 
-			err = store.persistEvent(event)
+			err = store.persistEvent(context.Background(), event)
 
 			requireKind(t, err, eventstore.KindStorage)
 			var storage *eventstore.StorageError
@@ -150,7 +151,7 @@ func TestPersistEventPreparationFailureAndRetry(t *testing.T) {
 			assert.Equal(t, beforeHead, head)
 			assert.Equal(t, beforeJournal, journal)
 
-			require.NoError(t, store.persistEvent(event))
+			require.NoError(t, store.persistEvent(context.Background(), event))
 
 			assert.Equal(t, 2, calls)
 			head, journal = store.observe(event.AggregateID())
@@ -171,10 +172,10 @@ func TestPersistEventProtectsInputAndObservation(t *testing.T) {
 	require.NoError(t, err)
 	first := newTestEvent(t, "copies", 1, []byte{0, 255, 13, 10})
 	second := newTestEvent(t, "copies", 2, []byte("second"))
-	require.NoError(t, store.persistEvent(first))
+	require.NoError(t, store.persistEvent(context.Background(), first))
 	firstHead, firstJournal := store.observe(first.AggregateID())
 	first.Payload()[0] = 99
-	require.NoError(t, store.persistEvent(second))
+	require.NoError(t, store.persistEvent(context.Background(), second))
 	second.Payload()[0] = 'X'
 	head, journal := store.observe(first.AggregateID())
 	require.NotNil(t, head)
@@ -226,7 +227,7 @@ func TestPersistEventCopiesBeforeCommitHook(t *testing.T) {
 		return nil
 	})
 
-	require.NoError(t, store.persistEvent(event))
+	require.NoError(t, store.persistEvent(context.Background(), event))
 	hookPayload[2] = 'Z'
 
 	head, journal := store.observe(original.AggregateID())
@@ -250,7 +251,7 @@ func TestPersistEventPreservesNilAndEmptyBytes(t *testing.T) {
 			require.NoError(t, err)
 			event := newTestEvent(t, "empty", 1, payload)
 
-			require.NoError(t, store.persistEvent(event))
+			require.NoError(t, store.persistEvent(context.Background(), event))
 
 			head, journal := store.observe(event.AggregateID())
 			require.NotNil(t, head)
@@ -266,7 +267,7 @@ func TestPersistEventUsesExactAggregateID(t *testing.T) {
 	require.NoError(t, err)
 	for _, value := range []string{"key", "key-extra"} {
 		event := newTestEvent(t, value, 1, []byte(value))
-		require.NoError(t, store.persistEvent(event))
+		require.NoError(t, store.persistEvent(context.Background(), event))
 	}
 
 	for _, value := range []string{"key", "key-extra"} {
@@ -288,7 +289,7 @@ func TestPersistEventParallelCommits(t *testing.T) {
 			store, err := NewStore()
 			require.NoError(t, err)
 			if seq == 2 {
-				require.NoError(t, store.persistEvent(newTestEvent(t, "parallel", 1, []byte("first"))))
+				require.NoError(t, store.persistEvent(context.Background(), newTestEvent(t, "parallel", 1, []byte("first"))))
 			}
 			store.hooks = testhook.New()
 			var commitCalls atomic.Int32
@@ -306,7 +307,7 @@ func TestPersistEventParallelCommits(t *testing.T) {
 				go func() {
 					ready.Done()
 					<-start
-					results <- outcome{payload: event.Payload(), err: store.persistEvent(event)}
+					results <- outcome{payload: event.Payload(), err: store.persistEvent(context.Background(), event)}
 				}()
 			}
 			ready.Wait()
@@ -353,7 +354,7 @@ func TestPersistEventHoldsStoreLockUntilPublication(t *testing.T) {
 			store, err := NewStore()
 			require.NoError(t, err)
 			if seq == 2 {
-				require.NoError(t, store.persistEvent(newTestEvent(t, "locked", 1, []byte("first"))))
+				require.NoError(t, store.persistEvent(context.Background(), newTestEvent(t, "locked", 1, []byte("first"))))
 			}
 			event := newTestEvent(t, "locked", seq, []byte("candidate"))
 			beforeHead, beforeJournal := store.observe(event.AggregateID())
@@ -375,7 +376,7 @@ func TestPersistEventHoldsStoreLockUntilPublication(t *testing.T) {
 				return nil
 			})
 			writeResult := make(chan error, 1)
-			go func() { writeResult <- store.persistEvent(event) }()
+			go func() { writeResult <- store.persistEvent(context.Background(), event) }()
 			select {
 			case <-entered:
 			case <-time.After(5 * time.Second):
@@ -401,10 +402,10 @@ func TestPersistEventHoldsStoreLockUntilPublication(t *testing.T) {
 			}()
 			other := newTestEvent(t, "locked-other", 1, []byte("other"))
 			otherResult := make(chan error, 1)
-			go func() { otherResult <- store.persistEvent(other) }()
+			go func() { otherResult <- store.persistEvent(context.Background(), other) }()
 			independentStore, err := NewStore()
 			require.NoError(t, err)
-			require.NoError(t, independentStore.persistEvent(newTestEvent(t, "locked", 1, []byte("independent"))))
+			require.NoError(t, independentStore.persistEvent(context.Background(), newTestEvent(t, "locked", 1, []byte("independent"))))
 
 			unblock()
 
