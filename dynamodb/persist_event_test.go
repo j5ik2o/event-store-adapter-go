@@ -93,6 +93,11 @@ func TestPersistEventOversizedItemsDoNotSend(t *testing.T) {
 				event := eventEnvelope(t, tc.typeName, "v", seqNr, time.Unix(0, 123), "payload", tc.manifest)
 				err := persistEvent(dynamodbtest.WithOperation(t.Context(), 1), store, serializer, event)
 				requireEventKind(t, err, eventstore.KindContractViolation)
+				var violation *eventstore.ContractViolationError
+				require.ErrorAs(t, err, &violation)
+				require.Equal(t, "D-7", violation.Rule)
+				require.NotNil(t, violation.SeqNr)
+				require.Equal(t, seqNr, *violation.SeqNr)
 				require.Empty(t, r.Requests(1))
 				if tc.name == "head only" {
 					prepared, err := eventstore.PrepareEvent(serializer, event)
