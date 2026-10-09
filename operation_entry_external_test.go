@@ -293,6 +293,41 @@ type bufferSerializer struct {
 	restored   []string
 }
 
+func TestPrepareEventOwnsBytesAndFixedMetadata(t *testing.T) {
+	id := &changingAggregateID{typeName: "Order", value: "item-1", laterTypeName: "Other-Type", laterValue: "changed"}
+	at := time.Unix(123, 456789123)
+	first, err := eventstore.NewEventEnvelope(id, 1, at, "first", eventstore.WithManifest(" 型\x00 "))
+	require.NoError(t, err)
+	serializer := &bufferSerializer{}
+	prepared, err := eventstore.PrepareEvent(serializer, first)
+	require.NoError(t, err)
+
+	// The serializer is allowed to reuse its buffer after preparation returns.
+	_, err = serializer.Serialize("overwritten")
+	require.NoError(t, err)
+	require.Equal(t, "Order-item-1", prepared.AggregateID())
+	require.Equal(t, first.SeqNr(), prepared.SeqNr())
+	require.Equal(t, at, prepared.OccurredAt())
+	require.Equal(t, first.Manifest(), prepared.Manifest())
+	require.Equal(t, []byte("first"), prepared.Payload())
+	require.NoError(t, prepared.Validate())
+	require.Equal(t, 1, id.typeNameCalls)
+	require.Equal(t, 1, id.valueCalls)
+
+	domain := domainEvent{AggregateID: "payload-id", SeqNr: "payload-number", Items: []string{"任意"}}
+	jsonSerializer := &recordingSerializer[domainEvent]{base: eventstore.NewJSONSerializer[domainEvent]()}
+	fixedID, err := eventstore.NewAggregateID("Order", "domain")
+	require.NoError(t, err)
+	event, err := eventstore.NewEventEnvelope(fixedID, 1, at, domain)
+	require.NoError(t, err)
+	stored, err := eventstore.PrepareEvent(jsonSerializer, event)
+	require.NoError(t, err)
+	require.Equal(t, []domainEvent{domain}, jsonSerializer.serialized)
+	var restored domainEvent
+	require.NoError(t, json.Unmarshal(stored.Payload(), &restored))
+	require.Equal(t, domain, restored)
+}
+
 func (s *bufferSerializer) Serialize(value string) ([]byte, error) {
 	s.serialized = append(s.serialized, value)
 	data := s.scratch[:len(value)]
