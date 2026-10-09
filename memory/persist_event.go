@@ -2,6 +2,7 @@ package memory
 
 import (
 	"bytes"
+	"context"
 
 	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
 	"github.com/j5ik2o/event-store-adapter-go/v2/internal/testhook"
@@ -9,11 +10,11 @@ import (
 
 // persistEvent commits an already serialized event. Validation and payload copying
 // precede locking; head comparison, preparation and publication share the store lock.
-func (s *Store) persistEvent(event eventstore.EventEnvelope[[]byte]) error {
+func (s *Store) persistEvent(ctx context.Context, event eventstore.EventEnvelope[[]byte]) error {
 	if err := event.Validate(); err != nil {
 		return err
 	}
-	return s.commit(prepareStoredEvent(event), nil)
+	return s.commit(ctx, prepareStoredEvent(event), nil)
 }
 
 // prepareStoredEvent fixes the validated event's metadata and owns its payload bytes.
@@ -29,9 +30,15 @@ func prepareStoredEvent(event eventstore.EventEnvelope[[]byte]) storedEvent {
 
 // commit prepares a complete next record and publishes it at one point under the store lock.
 // Candidates already own their bytes. Saved records remain immutable during preparation.
-func (s *Store) commit(candidate storedEvent, snapshot *storedSnapshot) error {
+func (s *Store) commit(ctx context.Context, candidate storedEvent, snapshot *storedSnapshot) error {
+	var retentionErr error
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer func() {
+		s.mu.Unlock()
+		if retentionErr != nil {
+			s.notifyRetentionFailure(ctx, candidate.aggregateID, retentionErr)
+		}
+	}()
 	var journal []storedEvent
 	current := s.records[candidate.aggregateID]
 	if current != nil {
@@ -77,5 +84,10 @@ func (s *Store) commit(candidate storedEvent, snapshot *storedSnapshot) error {
 		return &eventstore.StorageError{Cause: err}
 	}
 	s.records[candidate.aggregateID] = next
+	var justWritten eventstore.SeqNr
+	if snapshot != nil {
+		justWritten = snapshot.seqNr
+	}
+	retentionErr = s.retainHistory(candidate.aggregateID, next, justWritten)
 	return nil
 }

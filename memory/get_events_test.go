@@ -2,6 +2,7 @@ package memory
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -101,7 +102,7 @@ func TestGetEventsByIDSinceSeqNr(t *testing.T) {
 	require.NoError(t, err)
 	events := newReadTestEvents(t, id)
 	for _, event := range events {
-		require.NoError(t, store.persistEvent(event))
+		require.NoError(t, store.persistEvent(context.Background(), event))
 	}
 	missing, err := eventstore.NewAggregateID("Account", "missing")
 	require.NoError(t, err)
@@ -142,7 +143,7 @@ func TestGetEventsUsesExactAggregateID(t *testing.T) {
 		event, err := eventstore.NewEventEnvelope(id, 1, time.Unix(int64(i), 123456789), []byte(fmt.Sprint(i)))
 		require.NoError(t, err)
 		require.Equal(t, id.typeName+"-"+id.value, event.AggregateID())
-		require.NoError(t, store.persistEvent(event))
+		require.NoError(t, store.persistEvent(context.Background(), event))
 		expected = append(expected, event)
 	}
 	for i, id := range ids {
@@ -214,9 +215,9 @@ func TestGetEventsFixesInputsBeforeWaiting(t *testing.T) {
 	require.NoError(t, err)
 	expected := newReadTestEvents(t, fixedID)
 	for _, event := range expected {
-		require.NoError(t, store.persistEvent(event))
+		require.NoError(t, store.persistEvent(context.Background(), event))
 	}
-	require.NoError(t, store.persistEvent(newTestEvent(t, "changed", 1, []byte("other"))))
+	require.NoError(t, store.persistEvent(context.Background(), newTestEvent(t, "changed", 1, []byte("other"))))
 	store.mu.Lock()
 	unlock := sync.OnceFunc(store.mu.Unlock)
 	result := make(chan eventReadResult, 1)
@@ -260,12 +261,12 @@ func TestGetEventsSharesStoreAndIsolatesSeparateStores(t *testing.T) {
 	id, err := eventstore.NewAggregateID("Account", "shared-read")
 	require.NoError(t, err)
 	expected := newReadTestEvents(t, id)
-	require.NoError(t, firstCaller.persistEvent(expected[0]))
+	require.NoError(t, firstCaller.persistEvent(context.Background(), expected[0]))
 	before, err := secondCaller.getEventsByIDSinceSeqNr(id, 0)
 	require.NoError(t, err)
 	requireReadEvents(t, expected[:1], before)
 
-	require.NoError(t, firstCaller.persistEvent(expected[1]))
+	require.NoError(t, firstCaller.persistEvent(context.Background(), expected[1]))
 	after, err := secondCaller.getEventsByIDSinceSeqNr(id, 0)
 	require.NoError(t, err)
 	requireReadEvents(t, expected[:2], after)
@@ -276,7 +277,7 @@ func TestGetEventsSharesStoreAndIsolatesSeparateStores(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, empty)
 	isolated := newTestEvent(t, "shared-read", 1, []byte("isolated"))
-	require.NoError(t, separate.persistEvent(isolated))
+	require.NoError(t, separate.persistEvent(context.Background(), isolated))
 	other, err := separate.getEventsByIDSinceSeqNr(id, 0)
 	require.NoError(t, err)
 	requireReadEvents(t, []eventstore.EventEnvelope[[]byte]{isolated}, other)
@@ -298,7 +299,7 @@ func TestGetEventsProtectsInputValues(t *testing.T) {
 			eventstore.WithManifest(event.Manifest()))
 		require.NoError(t, err)
 		expected = append(expected, independent)
-		require.NoError(t, store.persistEvent(event))
+		require.NoError(t, store.persistEvent(context.Background(), event))
 	}
 	before, err := store.getEventsByIDSinceSeqNr(fixedID, 0)
 	require.NoError(t, err)
@@ -323,7 +324,7 @@ func TestGetEventsProtectsReturnedValues(t *testing.T) {
 	require.NoError(t, err)
 	expected := newReadTestEvents(t, id)
 	for _, event := range expected {
-		require.NoError(t, store.persistEvent(event))
+		require.NoError(t, store.persistEvent(context.Background(), event))
 	}
 	first, err := store.getEventsByIDSinceSeqNr(id, 0)
 	require.NoError(t, err)
@@ -353,7 +354,7 @@ func TestGetEventsPreservesNilAndEmptyBytes(t *testing.T) {
 			id, err := eventstore.NewAggregateID("Account", "empty-read")
 			require.NoError(t, err)
 			event := newTestEvent(t, "empty-read", 1, payload)
-			require.NoError(t, store.persistEvent(event))
+			require.NoError(t, store.persistEvent(context.Background(), event))
 
 			actual, err := store.getEventsByIDSinceSeqNr(id, 0)
 
@@ -370,7 +371,7 @@ func TestGetEventsReadFailurePreservesRecordsAndReleasesLock(t *testing.T) {
 	require.NoError(t, err)
 	expected := newReadTestEvents(t, id)
 	for _, event := range expected {
-		require.NoError(t, store.persistEvent(event))
+		require.NoError(t, store.persistEvent(context.Background(), event))
 	}
 	cause := &testhook.InjectedError{Phase: testhook.PhaseReadEvents, Message: "read failed"}
 	store.hooks = testhook.New()
@@ -410,7 +411,7 @@ func TestGetEventsWaitsForPublicationAndHoldsStoreReadLock(t *testing.T) {
 	require.NoError(t, err)
 	expected := newReadTestEvents(t, fixedID)
 	for _, event := range expected[:2] {
-		require.NoError(t, store.persistEvent(event))
+		require.NoError(t, store.persistEvent(context.Background(), event))
 	}
 	before, err := store.getEventsByIDSinceSeqNr(fixedID, 0)
 	require.NoError(t, err)
@@ -436,7 +437,7 @@ func TestGetEventsWaitsForPublicationAndHoldsStoreReadLock(t *testing.T) {
 	})
 	writeResult := make(chan error, 1)
 	writeDone := make(chan struct{})
-	go func() { writeResult <- store.persistEvent(expected[2]); close(writeDone) }()
+	go func() { writeResult <- store.persistEvent(context.Background(), expected[2]); close(writeDone) }()
 	readResult := make(chan eventReadResult, 1)
 	readDone := make(chan struct{})
 	// Every exit releases both hooks and collects the goroutines it has started.

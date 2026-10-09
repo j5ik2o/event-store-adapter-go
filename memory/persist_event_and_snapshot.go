@@ -2,13 +2,14 @@ package memory
 
 import (
 	"bytes"
+	"context"
 
 	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
 )
 
 // persistEventAndSnapshot commits an already serialized event and snapshot together.
 // Both envelopes are validated and their bytes are fixed before taking the store lock.
-func (s *Store) persistEventAndSnapshot(event eventstore.EventEnvelope[[]byte], snapshot eventstore.SnapshotEnvelope[[]byte]) error {
+func (s *Store) persistEventAndSnapshot(ctx context.Context, event eventstore.EventEnvelope[[]byte], snapshot eventstore.SnapshotEnvelope[[]byte]) error {
 	if err := event.Validate(); err != nil {
 		return err
 	}
@@ -25,5 +26,5 @@ func (s *Store) persistEventAndSnapshot(event eventstore.EventEnvelope[[]byte], 
 		manifest: snapshot.Manifest(),
 		payload:  bytes.Clone(snapshot.Aggregate()),
 	}
-	return s.commit(candidate, preparedSnapshot)
+	return s.commit(ctx, candidate, preparedSnapshot)
 }

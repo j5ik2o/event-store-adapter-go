@@ -2,6 +2,7 @@ package memory
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -126,13 +127,13 @@ func TestPersistEventAndSnapshotCommitsCurrentAndHistory(t *testing.T) {
 			require.NoError(t, err)
 			requirePairState(t, store, id, nil, nil, history)
 
-			require.NoError(t, store.persistEventAndSnapshot(events[0], first))
+			require.NoError(t, store.persistEventAndSnapshot(context.Background(), events[0], first))
 			requirePairState(t, store, id, events[:1], []eventstore.SnapshotEnvelope[[]byte]{first}, history)
 			oldHead, oldState := store.observeState(events[0].AggregateID())
 			oldRead, err := store.getEventsByIDSinceSeqNr(id, 0)
 			require.NoError(t, err)
 
-			require.NoError(t, store.persistEventAndSnapshot(events[1], second))
+			require.NoError(t, store.persistEventAndSnapshot(context.Background(), events[1], second))
 			requirePairState(t, store, id, events[:2], []eventstore.SnapshotEnvelope[[]byte]{first, second}, history)
 			assert.Equal(t, eventstore.SeqNr(1), oldHead.seqNr)
 			require.Len(t, oldState.journal, 1)
@@ -141,11 +142,11 @@ func TestPersistEventAndSnapshotCommitsCurrentAndHistory(t *testing.T) {
 			requireReadEvents(t, events[:1], oldRead)
 
 			// Event-only appends must preserve the snapshot fields of the extended record.
-			require.NoError(t, store.persistEvent(events[2]))
+			require.NoError(t, store.persistEvent(context.Background(), events[2]))
 			requirePairState(t, store, id, events, []eventstore.SnapshotEnvelope[[]byte]{first, second}, history)
 			fourth := newTestEvent(t, "continuous-pair", 4, []byte("fourth"))
 			fourthSnapshot := newTestSnapshot(t, 4, []byte("fourth-state"))
-			require.NoError(t, store.persistEventAndSnapshot(fourth, fourthSnapshot))
+			require.NoError(t, store.persistEventAndSnapshot(context.Background(), fourth, fourthSnapshot))
 			requirePairState(t, store, id, append(events, fourth), []eventstore.SnapshotEnvelope[[]byte]{first, second, fourthSnapshot}, history)
 		})
 	}
@@ -179,7 +180,7 @@ func TestPersistEventAndSnapshotSequenceChecksPreserveRecords(t *testing.T) {
 			snapshot := newTestSnapshot(t, tc.seq, []byte("snapshot-"+tc.name))
 			beforeHead, beforeState := store.observeState(event.AggregateID())
 
-			err := store.persistEventAndSnapshot(event, snapshot)
+			err := store.persistEventAndSnapshot(context.Background(), event, snapshot)
 
 			switch tc.kind {
 			case 0:
@@ -221,7 +222,7 @@ func TestPersistEventAndSnapshotRejectsInvalidInputsBeforeLock(t *testing.T) {
 			require.NoError(t, err)
 			first := newTestEvent(t, "pair-invalid", 1, []byte("first"))
 			firstSnapshot := newTestSnapshot(t, 1, []byte("first-state"))
-			require.NoError(t, store.persistEventAndSnapshot(first, firstSnapshot))
+			require.NoError(t, store.persistEventAndSnapshot(context.Background(), first, firstSnapshot))
 			beforeHead, beforeState := store.observeState(first.AggregateID())
 			event := newTestEvent(t, "pair-invalid", 2, []byte("rejected"))
 			snapshot := newTestSnapshot(t, tc.seq, []byte("rejected-state"))
@@ -239,7 +240,7 @@ func TestPersistEventAndSnapshotRejectsInvalidInputsBeforeLock(t *testing.T) {
 			result := make(chan error, 1)
 			done := make(chan struct{})
 			t.Cleanup(func() { unlock(); waitForReadSignal(t, done, "invalid pair writer exit") })
-			go func() { result <- store.persistEventAndSnapshot(event, snapshot); close(done) }()
+			go func() { result <- store.persistEventAndSnapshot(context.Background(), event, snapshot); close(done) }()
 
 			waitForReadSignal(t, done, "pair rejection before taking the store lock")
 			err = <-result
@@ -268,7 +269,7 @@ func TestPersistEventAndSnapshotRejectsZeroEventConstruction(t *testing.T) {
 	require.NoError(t, err)
 	first := newTestEvent(t, "pair-zero", 1, []byte("first"))
 	firstSnapshot := newTestSnapshot(t, 1, []byte("first-state"))
-	require.NoError(t, store.persistEventAndSnapshot(first, firstSnapshot))
+	require.NoError(t, store.persistEventAndSnapshot(context.Background(), first, firstSnapshot))
 	beforeHead, beforeState := store.observeState(first.AggregateID())
 	snapshot := newTestSnapshot(t, 0, []byte("zero-state"))
 
@@ -277,7 +278,7 @@ func TestPersistEventAndSnapshotRejectsZeroEventConstruction(t *testing.T) {
 	zero := eventstore.SeqNr(0)
 	requirePairViolation(t, err, "W-6", &zero, nil)
 	// A failed construction returns an unconstructed envelope; its entrance error is T-2.
-	err = store.persistEventAndSnapshot(event, snapshot)
+	err = store.persistEventAndSnapshot(context.Background(), event, snapshot)
 	requirePairViolation(t, err, "T-2", nil, nil)
 	head, state := store.observeState(first.AggregateID())
 	assert.Equal(t, beforeHead, head)
@@ -297,7 +298,7 @@ func TestPersistEventAndSnapshotPreparationFailureAndRetry(t *testing.T) {
 				if seq == 2 {
 					first := newTestEvent(t, "pair-failure", 1, []byte("first"))
 					firstSnapshot := newTestSnapshot(t, 1, []byte("first-state"))
-					require.NoError(t, store.persistEventAndSnapshot(first, firstSnapshot))
+					require.NoError(t, store.persistEventAndSnapshot(context.Background(), first, firstSnapshot))
 					events = append(events, first)
 					snapshots = append(snapshots, firstSnapshot)
 				}
@@ -319,7 +320,7 @@ func TestPersistEventAndSnapshotPreparationFailureAndRetry(t *testing.T) {
 					return nil
 				})
 
-				err = store.persistEventAndSnapshot(event, snapshot)
+				err = store.persistEventAndSnapshot(context.Background(), event, snapshot)
 
 				requireKind(t, err, eventstore.KindStorage)
 				var storage *eventstore.StorageError
@@ -332,7 +333,7 @@ func TestPersistEventAndSnapshotPreparationFailureAndRetry(t *testing.T) {
 				assert.Equal(t, beforeState, state)
 				requirePairState(t, store, id, events, snapshots, history)
 
-				require.NoError(t, store.persistEventAndSnapshot(event, snapshot))
+				require.NoError(t, store.persistEventAndSnapshot(context.Background(), event, snapshot))
 
 				assert.Equal(t, 2, calls)
 				requirePairState(t, store, id, append(events, event), append(snapshots, snapshot), history)
@@ -376,7 +377,7 @@ func TestPersistEventAndSnapshotOwnsInputReturnedAndObservedValues(t *testing.T)
 		return nil
 	})
 	for i := range inputs {
-		require.NoError(t, store.persistEventAndSnapshot(inputs[i], snapshots[i]))
+		require.NoError(t, store.persistEventAndSnapshot(context.Background(), inputs[i], snapshots[i]))
 	}
 	id.typeName, id.value = "Changed", "caller"
 	for _, payload := range hookPayloads {
@@ -437,7 +438,7 @@ func TestPersistEventAndSnapshotPreservesNilAndEmptyBytes(t *testing.T) {
 					event := newTestEvent(t, "pair-empty", 1, payload)
 					snapshot := newTestSnapshot(t, 1, aggregate)
 
-					require.NoError(t, store.persistEventAndSnapshot(event, snapshot))
+					require.NoError(t, store.persistEventAndSnapshot(context.Background(), event, snapshot))
 
 					requirePairState(t, store, id, []eventstore.EventEnvelope[[]byte]{event}, []eventstore.SnapshotEnvelope[[]byte]{snapshot}, history)
 				})
@@ -457,16 +458,16 @@ func TestPersistEventAndSnapshotSharesStoreAndIsolatesSeparateStores(t *testing.
 		newTestSnapshot(t, 2, []byte("second-state")),
 	}
 
-	require.NoError(t, firstCaller.persistEventAndSnapshot(events[0], snapshots[0]))
+	require.NoError(t, firstCaller.persistEventAndSnapshot(context.Background(), events[0], snapshots[0]))
 	requirePairState(t, secondCaller, id, events[:1], snapshots[:1], true)
-	require.NoError(t, secondCaller.persistEventAndSnapshot(events[1], snapshots[1]))
+	require.NoError(t, secondCaller.persistEventAndSnapshot(context.Background(), events[1], snapshots[1]))
 	requirePairState(t, firstCaller, id, events, snapshots, true)
 	beforeHead, beforeState := store.observeState(events[0].AggregateID())
 	separate := newPairTestStore(t, true)
 	requirePairState(t, separate, id, nil, nil, true)
 	otherEvent := newTestEvent(t, "pair-shared", 1, []byte("isolated-event"))
 	otherSnapshot := newTestSnapshot(t, 1, []byte("isolated-state"))
-	require.NoError(t, separate.persistEventAndSnapshot(otherEvent, otherSnapshot))
+	require.NoError(t, separate.persistEventAndSnapshot(context.Background(), otherEvent, otherSnapshot))
 
 	requirePairState(t, separate, id, []eventstore.EventEnvelope[[]byte]{otherEvent}, []eventstore.SnapshotEnvelope[[]byte]{otherSnapshot}, true)
 	requirePairState(t, store, id, events, snapshots, true)
@@ -488,7 +489,7 @@ func TestPersistEventAndSnapshotParallelCommits(t *testing.T) {
 				if seq == 2 {
 					first := newTestEvent(t, "parallel-pair", 1, []byte("first"))
 					firstSnapshot := newTestSnapshot(t, 1, []byte("first-state"))
-					require.NoError(t, store.persistEventAndSnapshot(first, firstSnapshot))
+					require.NoError(t, store.persistEventAndSnapshot(context.Background(), first, firstSnapshot))
 					previousEvents = append(previousEvents, first)
 					previousSnapshots = append(previousSnapshots, firstSnapshot)
 				}
@@ -520,7 +521,7 @@ func TestPersistEventAndSnapshotParallelCommits(t *testing.T) {
 						defer finished.Done()
 						ready.Done()
 						<-start
-						results <- outcome{worker: i, err: store.persistEventAndSnapshot(events[i], snapshots[i])}
+						results <- outcome{worker: i, err: store.persistEventAndSnapshot(context.Background(), events[i], snapshots[i])}
 					}()
 				}
 				ready.Wait()
@@ -561,7 +562,7 @@ func TestPersistEventAndSnapshotHoldsStoreLockUntilPublication(t *testing.T) {
 				if seq == 2 {
 					first := newTestEvent(t, "stopped-pair", 1, []byte("first"))
 					firstSnapshot := newTestSnapshot(t, 1, []byte("first-state"))
-					require.NoError(t, store.persistEventAndSnapshot(first, firstSnapshot))
+					require.NoError(t, store.persistEventAndSnapshot(context.Background(), first, firstSnapshot))
 					previousEvents = append(previousEvents, first)
 					previousSnapshots = append(previousSnapshots, firstSnapshot)
 				}
@@ -586,7 +587,10 @@ func TestPersistEventAndSnapshotHoldsStoreLockUntilPublication(t *testing.T) {
 				writeResult := make(chan error, 1)
 				writeDone := make(chan struct{})
 				t.Cleanup(func() { unblock(); waitForReadSignal(t, writeDone, "stopped pair writer exit") })
-				go func() { writeResult <- store.persistEventAndSnapshot(event, snapshot); close(writeDone) }()
+				go func() {
+					writeResult <- store.persistEventAndSnapshot(context.Background(), event, snapshot)
+					close(writeDone)
+				}()
 				waitForReadSignal(t, entered, "real pair preparation before publication")
 				assert.Equal(t, beforeState, beforePublication, "actual journal/current/history must still be the complete old record")
 				if beforeHead != nil {
@@ -630,7 +634,7 @@ func TestPersistEventAndSnapshotHoldsStoreLockUntilPublication(t *testing.T) {
 				t.Cleanup(func() { unblock(); waitForReadSignal(t, otherDone, "other aggregate writer exit") })
 				go func() {
 					close(otherStarted)
-					otherResult <- store.persistEventAndSnapshot(other, otherSnapshot)
+					otherResult <- store.persistEventAndSnapshot(context.Background(), other, otherSnapshot)
 					close(otherDone)
 				}()
 				waitForReadSignal(t, otherStarted, "another aggregate writer during the stopped pair write")
@@ -650,7 +654,7 @@ func TestPersistEventAndSnapshotHoldsStoreLockUntilPublication(t *testing.T) {
 				independent := newPairTestStore(t, history)
 				independentEvent := newTestEvent(t, "stopped-pair", 1, []byte("independent"))
 				independentSnapshot := newTestSnapshot(t, 1, []byte("independent-state"))
-				require.NoError(t, independent.persistEventAndSnapshot(independentEvent, independentSnapshot))
+				require.NoError(t, independent.persistEventAndSnapshot(context.Background(), independentEvent, independentSnapshot))
 				requirePairState(t, independent, fixedID, []eventstore.EventEnvelope[[]byte]{independentEvent}, []eventstore.SnapshotEnvelope[[]byte]{independentSnapshot}, history)
 
 				unblock()

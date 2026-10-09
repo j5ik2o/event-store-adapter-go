@@ -357,11 +357,12 @@ type Store struct{ /* 非公開: 記録・設定・排他制御 */ }
 func NewStore(opts ...eventstore.Option) (*Store, error) // MEM-3: 生成時に設定を検査
 
 // New は Store を使うインスタンスを作る。同じ *Store を渡した場合だけ記録・設定・排他制御を共有する。
+// nil の Store または必須シリアライザは、生成時に ConfigurationError を返す。
 func New[E, A any](
     store *Store,
     eventSerializer eventstore.Serializer[E],
     snapshotSerializer eventstore.Serializer[A],
-) eventstore.EventStore[E, A]
+) (eventstore.EventStore[E, A], error)
 ```
 
 ### 2.9 保持処理の失敗を知らせる経路（S-4・MEM-11）
