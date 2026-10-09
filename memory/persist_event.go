@@ -13,18 +13,28 @@ func (s *Store) persistEvent(event eventstore.EventEnvelope[[]byte]) error {
 	if err := event.Validate(); err != nil {
 		return err
 	}
-	candidate := storedEvent{
+	return s.commit(prepareStoredEvent(event), nil)
+}
+
+// prepareStoredEvent fixes the validated event's metadata and owns its payload bytes.
+func prepareStoredEvent(event eventstore.EventEnvelope[[]byte]) storedEvent {
+	return storedEvent{
 		aggregateID: event.AggregateID(),
 		seqNr:       event.SeqNr(),
 		occurredAt:  event.OccurredAt(),
 		manifest:    event.Manifest(),
 		payload:     bytes.Clone(event.Payload()),
 	}
+}
 
+// commit prepares a complete next record and publishes it at one point under the store lock.
+// Candidates already own their bytes. Saved records remain immutable during preparation.
+func (s *Store) commit(candidate storedEvent, snapshot *storedSnapshot) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var journal []storedEvent
-	if current := s.records[candidate.aggregateID]; current != nil {
+	current := s.records[candidate.aggregateID]
+	if current != nil {
 		journal = current.journal
 	}
 	var headSeqNr eventstore.SeqNr
@@ -45,6 +55,19 @@ func (s *Store) persistEvent(event eventstore.EventEnvelope[[]byte]) error {
 	next := &record{journal: make([]storedEvent, len(journal)+1)}
 	copy(next.journal, journal)
 	next.journal[len(journal)] = candidate
+	if current != nil {
+		next.current = current.current
+		next.history = current.history
+	}
+	if snapshot != nil {
+		next.current = snapshot
+		if s.settings.RetentionCount != nil {
+			history := make([]storedSnapshot, len(next.history)+1)
+			copy(history, next.history)
+			history[len(next.history)] = *snapshot
+			next.history = history
+		}
+	}
 	if err := s.hooks.Fail(testhook.Point{
 		Phase:       testhook.PhaseCommit,
 		AggregateID: candidate.aggregateID,
