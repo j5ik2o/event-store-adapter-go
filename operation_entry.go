@@ -48,10 +48,7 @@ type operationEntry[E, A any] struct {
 }
 
 func (s *operationEntry[E, A]) PersistEvent(ctx context.Context, event EventEnvelope[E]) error {
-	if err := event.Validate(); err != nil {
-		return err
-	}
-	stored, err := s.serializeEvent(event)
+	stored, err := PrepareEvent(s.eventSerializer, event)
 	if err != nil {
 		return err
 	}
@@ -68,7 +65,7 @@ func (s *operationEntry[E, A]) PersistEventAndSnapshot(ctx context.Context, even
 	if event.seqNr != snapshot.seqNr {
 		return &ContractViolationError{Rule: "W-9", SeqNr: &event.seqNr, SnapshotSeqNr: &snapshot.seqNr}
 	}
-	storedEvent, err := s.serializeEvent(event)
+	storedEvent, err := PrepareEvent(s.eventSerializer, event)
 	if err != nil {
 		return err
 	}
@@ -153,8 +150,17 @@ func (s *operationEntry[E, A]) GetEventsByIDSinceSeqNr(ctx context.Context, id A
 	return result, nil
 }
 
-func (s *operationEntry[E, A]) serializeEvent(event EventEnvelope[E]) (EventEnvelope[[]byte], error) {
-	data, err := s.eventSerializer.Serialize(event.payload)
+// PrepareEvent validates an event and serializes only its payload for a storage
+// boundary. It preserves the envelope's fixed metadata and owns the returned bytes.
+// Paired writes must validate both envelopes and W-9 before calling this function.
+func PrepareEvent[E any](serializer Serializer[E], event EventEnvelope[E]) (EventEnvelope[[]byte], error) {
+	if err := event.Validate(); err != nil {
+		return EventEnvelope[[]byte]{}, err
+	}
+	if nilDependency(serializer) {
+		return EventEnvelope[[]byte]{}, newConfigurationError(errors.New("event serializer is nil"))
+	}
+	data, err := serializer.Serialize(event.payload)
 	if err != nil {
 		return EventEnvelope[[]byte]{}, classifySerializationError(err)
 	}

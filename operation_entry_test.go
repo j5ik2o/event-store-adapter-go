@@ -461,3 +461,28 @@ func TestNewOperationEntryRejectsNilDependencies(t *testing.T) {
 		})
 	}
 }
+
+func TestPrepareEventFailures(t *testing.T) {
+	serializer := &entrySerializer{base: NewJSONSerializer[string]()}
+	prepared, err := PrepareEvent(serializer, EventEnvelope[string]{})
+	requireContractViolation(t, err, "T-2")
+	assert.Empty(t, prepared.AggregateID())
+	assert.Zero(t, serializer.serializeCalls)
+
+	event, err := NewEventEnvelope(userID{"Order", "prepare"}, 1, time.Unix(0, 123), "payload")
+	require.NoError(t, err)
+	for _, missing := range []Serializer[string]{nil, (*entrySerializer)(nil)} {
+		_, err := PrepareEvent(missing, event)
+		var configuration *ConfigurationError
+		require.ErrorAs(t, err, &configuration)
+	}
+	cause := errors.New("serializer failed")
+	for _, original := range []error{cause, &SerializationError{Cause: cause}, &ConfigurationError{Cause: cause}} {
+		serializer.serializeErr = original
+		prepared, err = PrepareEvent(serializer, event)
+		requireSerializationFailure(t, err)
+		assert.ErrorIs(t, err, original)
+		assert.ErrorIs(t, err, cause)
+		assert.Empty(t, prepared.AggregateID())
+	}
+}
