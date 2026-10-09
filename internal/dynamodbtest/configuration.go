@@ -74,6 +74,10 @@ func (t *Tables) ConfigurationAPIOption(injection conformance.Injection) func(*m
 					continue
 				}
 				if fault.Spec.Injection == "replace-request" {
+					// A request replacement cannot apply after the real handler ran.
+					if read {
+						continue
+					}
 					var replacement error
 					applied, err := fault.TryApplyWith(func() error {
 						if raw, present := fault.Spec.Details["install_items"]; present {

@@ -341,3 +341,125 @@ func TestConfigurationSDKConcurrentFaultApplications(t *testing.T) {
 	require.Len(t, recorder.Requests(0), 20)
 	require.NoError(t, finish())
 }
+
+func TestConfigurationSDKConcurrentReplacementMethods(t *testing.T) {
+	e := startEnvironment(t)
+	for _, method := range []string{"replace-request", "replace-response"} {
+		t.Run(method, func(t *testing.T) {
+			tables, _ := createTables(t, e, false)
+			require.NoError(t, tables.PutConfigurationItems(context.Background(), configurationFixtureInputs("mixed-seed")))
+			second := conformance.FaultSpec{Operation: 0, Phase: "configuration-read", Kind: "sdk-response", Repeat: "count", Count: 1, Injection: method, Details: map[string]any{"unprocessed_keys": []any{"journal:__config__:0"}}}
+			if method == "replace-request" {
+				second.Kind = "sdk-error"
+				second.Details = map[string]any{"code": "ProvisionedThroughputExceededException"}
+			}
+			injection, finish := conformance.NewInitializationInjection([]conformance.FaultSpec{
+				{Operation: 0, Phase: "configuration-read", Kind: "sdk-response", Repeat: "count", Count: 1, Injection: "replace-response", Details: map[string]any{"unprocessed_keys": []any{"head:__config__"}}},
+				second,
+			})
+			recorder := NewRecorder()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			type callKey struct{}
+			type result struct {
+				out *dynamodb.BatchGetItemOutput
+				err error
+			}
+			var actual [2]*dynamodb.BatchGetItemOutput
+			var actualMetadata, returnedMetadata [2]middleware.Metadata
+			results := [2]chan result{make(chan result, 1), make(chan result, 1)}
+			release := [2]chan struct{}{make(chan struct{}), make(chan struct{})}
+			arrived := make(chan int, 4)
+			calls := make(chan int, 4)
+			observe := func(stack *middleware.Stack) error {
+				if err := stack.Finalize.Insert(middleware.FinalizeMiddlewareFunc("observe-replacement-result", func(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (middleware.FinalizeOutput, middleware.Metadata, error) {
+					out, metadata, err := next.HandleFinalize(ctx, in)
+					returnedMetadata[ctx.Value(callKey{}).(int)] = metadata.Clone()
+					return out, metadata, err
+				}), "configuration-fault", middleware.Before); err != nil {
+					return err
+				}
+				return stack.Finalize.Insert(middleware.FinalizeMiddlewareFunc("hold-real-replacement-response", func(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (middleware.FinalizeOutput, middleware.Metadata, error) {
+					id := ctx.Value(callKey{}).(int)
+					calls <- id
+					out, metadata, err := next.HandleFinalize(ctx, in)
+					if err != nil {
+						return out, metadata, err
+					}
+					actual[id] = cloneValue(reflect.ValueOf(out.Result)).Interface().(*dynamodb.BatchGetItemOutput)
+					actualMetadata[id] = metadata.Clone()
+					arrived <- id
+					select {
+					case <-release[id]:
+						return out, metadata, nil
+					case <-ctx.Done():
+						return out, metadata, ctx.Err()
+					}
+				}), "configuration-fault", middleware.After)
+			}
+			client := e.NewClient(recorder.APIOption, tables.ConfigurationAPIOption(injection), observe)
+			var workers sync.WaitGroup
+			defer func() { cancel(); workers.Wait() }()
+			for id := 0; id < 2; id++ {
+				workers.Go(func() {
+					input := configurationBatchInput(tables.names)
+					out, err := client.BatchGetItem(WithOperation(context.WithValue(ctx, callKey{}, id), 0), input)
+					results[id] <- result{out, err}
+				})
+			}
+			for i := 0; i < 2; i++ {
+				select {
+				case <-arrived:
+				case <-ctx.Done():
+					t.Fatal("both real responses must arrive before either replacement consumes its count")
+				}
+			}
+			for _, fault := range injection.Faults {
+				require.Zero(t, fault.Fired())
+			}
+			// Release one response first so the other loses the first fault's count.
+			close(release[0])
+			first := <-results[0]
+			require.NoError(t, first.err)
+			require.Equal(t, 1, injection.Faults[0].Fired())
+			close(release[1])
+			later := <-results[1]
+			workers.Wait()
+			t.Logf("method=%s handler_calls=%d fired=%d/%d later_error=%v", method, len(calls), injection.Faults[0].Fired(), injection.Faults[1].Fired(), later.err)
+			require.NoError(t, later.err, "a sent request cannot receive a later request replacement")
+			require.Len(t, calls, 2, "each concurrent request invokes the real handler exactly once")
+			require.Len(t, recorder.Requests(0), 2)
+			require.Empty(t, arrived)
+			deferred := [2]Table{"head", "journal"}
+			if method == "replace-request" {
+				deferred[1] = ""
+			}
+			for id, got := range []result{first, later} {
+				require.NotEqual(t, middleware.Metadata{}, actualMetadata[id], "observe nonempty real SDK metadata")
+				require.Equal(t, actualMetadata[id], returnedMetadata[id], "replacement selection preserves the real metadata")
+				for table, name := range tables.names {
+					require.Len(t, actual[id].Responses[name], 1)
+					if table == deferred[id] {
+						require.Empty(t, got.out.Responses[name])
+						require.Equal(t, configurationBatchInput(tables.names).RequestItems[name], got.out.UnprocessedKeys[name])
+					} else {
+						require.Equal(t, actual[id].Responses[name], got.out.Responses[name])
+					}
+				}
+				if deferred[id] == "" {
+					require.Equal(t, actual[id].UnprocessedKeys, got.out.UnprocessedKeys)
+				} else {
+					require.Len(t, got.out.UnprocessedKeys, 1)
+				}
+			}
+			if method == "replace-request" {
+				require.Zero(t, injection.Faults[1].Fired())
+				require.ErrorContains(t, finish(), "fault #1 (operation 0, phase configuration-read, kind sdk-error) fired 0 times, want exactly 1")
+			} else {
+				require.Equal(t, 1, injection.Faults[1].Fired())
+				require.NoError(t, finish())
+			}
+			t.Logf("method=%s actual_responses_retained=true metadata_preserved=true fired=%d/%d", method, injection.Faults[0].Fired(), injection.Faults[1].Fired())
+		})
+	}
+}
