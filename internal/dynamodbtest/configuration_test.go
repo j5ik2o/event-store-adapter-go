@@ -5,10 +5,13 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/aws/smithy-go"
+	"github.com/aws/smithy-go/middleware"
 	"github.com/j5ik2o/event-store-adapter-go/v2/internal/conformance"
 	"github.com/stretchr/testify/require"
 )
@@ -89,6 +92,28 @@ func TestConfigurationFixturesRejectInvalidInputs(t *testing.T) {
 	}
 }
 
+func TestConfigurationSDKResponseTypeFailure(t *testing.T) {
+	// A deserialization double supplies the wrong result type and no item data.
+	tables := &Tables{names: map[Table]string{"journal": "j", "snapshot": "s", "head": "h"}}
+	injection, finish := conformance.NewInitializationInjection([]conformance.FaultSpec{{Operation: 0, Phase: "configuration-read", Kind: "sdk-response", Repeat: "count", Count: 1, Injection: "replace-response", Details: map[string]any{"unprocessed_keys": []any{"head:__config__"}}}})
+	stack := middleware.NewStack("configuration-response-type", func() any { return nil })
+	require.NoError(t, tables.ConfigurationAPIOption(injection)(stack))
+	require.NoError(t, stack.Deserialize.Add(middleware.DeserializeMiddlewareFunc("wrong-configuration-result-type", func(ctx context.Context, in middleware.DeserializeInput, next middleware.DeserializeHandler) (middleware.DeserializeOutput, middleware.Metadata, error) {
+		out, metadata, err := next.HandleDeserialize(ctx, in)
+		out.Result = &dynamodb.QueryOutput{}
+		return out, metadata, err
+	}), middleware.After))
+	calls := 0
+	_, _, err := stack.HandleMiddleware(context.Background(), configurationBatchInput(tables.names), middleware.HandlerFunc(func(context.Context, any) (any, middleware.Metadata, error) {
+		calls++
+		return nil, middleware.Metadata{}, nil
+	}))
+	require.ErrorContains(t, err, "configuration response is *dynamodb.QueryOutput")
+	require.Equal(t, 1, calls)
+	require.Zero(t, injection.Faults[0].Fired())
+	require.ErrorContains(t, finish(), "fired 0 times, want exactly 1")
+}
+
 func TestConfigurationSDKFaultApplication(t *testing.T) {
 	e := startEnvironment(t)
 	t.Run("response is partitioned from actual Local output", func(t *testing.T) {
@@ -151,6 +176,94 @@ func TestConfigurationSDKFaultApplication(t *testing.T) {
 		}
 		require.NoError(t, finish())
 	})
+	t.Run("failed response partition remains unfired", func(t *testing.T) {
+		tables, _ := createTables(t, e, false)
+		require.NoError(t, tables.PutConfigurationItems(context.Background(), configurationFixtureInputs("partition-seed")))
+		input := configurationBatchInput(tables.names)
+		delete(input.RequestItems, tables.names["journal"])
+		delete(input.RequestItems, tables.names["snapshot"])
+		injection, finish := conformance.NewInitializationInjection([]conformance.FaultSpec{{Operation: 0, Phase: "configuration-read", Kind: "sdk-response", Repeat: "count", Count: 1, Injection: "replace-response", Details: map[string]any{"unprocessed_keys": []any{"head:__config__", "journal:__config__:0"}}}})
+		recorder := NewRecorder()
+		_, err := e.NewClient(recorder.APIOption, tables.ConfigurationAPIOption(injection)).BatchGetItem(WithOperation(context.Background(), 0), input)
+		require.ErrorContains(t, err, `unprocessed key "journal:__config__:0" was not requested`)
+		require.Len(t, recorder.Requests(0), 1)
+		require.Zero(t, injection.Faults[0].Fired())
+		require.ErrorContains(t, finish(), "fired 0 times, want exactly 1")
+		actual, err := tables.GetItem(context.Background(), "head", input.RequestItems[tables.names["head"]].Keys[0])
+		require.NoError(t, err)
+		require.Equal(t, &types.AttributeValueMemberS{Value: "partition-seed"}, actual["store_id"])
+		t.Logf("failed response partition: fired=%d requests=%d persisted_store_id=%s", injection.Faults[0].Fired(), len(recorder.Requests(0)), actual["store_id"].(*types.AttributeValueMemberS).Value)
+	})
+	t.Run("failed explicit installation preserves actual SDK cause and remains unfired", func(t *testing.T) {
+		tables, _ := createTables(t, e, false)
+		_, err := e.NewClient().DeleteTable(context.Background(), &dynamodb.DeleteTableInput{TableName: aws.String(tables.names["journal"])})
+		require.NoError(t, err)
+		var fixtures []any
+		for _, fixture := range configurationFixtureInputs("install-input") {
+			fixtures = append(fixtures, fixture)
+		}
+		injection, finish := conformance.NewInitializationInjection([]conformance.FaultSpec{{Operation: 0, Phase: "configuration-create", Kind: "sdk-error", Repeat: "count", Count: 1, Injection: "replace-request", Details: map[string]any{"code": "ConditionalCheckFailedException", "install_items": fixtures}}})
+		input := configurationBatchInput(tables.names)
+		write := &dynamodb.TransactWriteItemsInput{}
+		for table, request := range input.RequestItems {
+			write.TransactItems = append(write.TransactItems, types.TransactWriteItem{Put: &types.Put{TableName: aws.String(table), Item: request.Keys[0]}})
+		}
+		recorder := NewRecorder()
+		_, err = e.NewClient(recorder.APIOption, tables.ConfigurationAPIOption(injection)).TransactWriteItems(WithOperation(context.Background(), 0), write)
+		var missing *types.ResourceNotFoundException
+		var operation, installation *smithy.OperationError
+		require.ErrorAs(t, err, &missing)
+		require.ErrorIs(t, err, missing)
+		require.ErrorAs(t, err, &operation)
+		require.Equal(t, "TransactWriteItems", operation.OperationName)
+		require.ErrorAs(t, operation.Err, &installation)
+		require.Equal(t, "PutItem", installation.OperationName)
+		require.Len(t, recorder.Requests(0), 1)
+		require.Zero(t, injection.Faults[0].Fired())
+		require.ErrorContains(t, finish(), "fired 0 times, want exactly 1")
+		for _, table := range []Table{"snapshot", "head"} {
+			item, err := tables.GetItem(context.Background(), table, input.RequestItems[tables.names[table]].Keys[0])
+			require.NoError(t, err)
+			require.Empty(t, item, "installation failure does not forward the transaction")
+		}
+		t.Logf("failed request replacement: install_operation=%s code=%s fired=%d requests=%d", installation.OperationName, missing.ErrorCode(), injection.Faults[0].Fired(), len(recorder.Requests(0)))
+	})
+	t.Run("declaration order skips exhausted response before request replacement", func(t *testing.T) {
+		tables, _ := createTables(t, e, false)
+		require.NoError(t, tables.PutConfigurationItems(context.Background(), configurationFixtureInputs("ordered-seed")))
+		injection, finish := conformance.NewInitializationInjection([]conformance.FaultSpec{
+			{Operation: 0, Phase: "configuration-read", Kind: "sdk-response", Repeat: "count", Count: 1, Injection: "replace-response", Details: map[string]any{"unprocessed_keys": []any{"head:__config__"}}},
+			{Operation: 0, Phase: "configuration-read", Kind: "sdk-error", Repeat: "count", Count: 1, Injection: "replace-request", Details: map[string]any{"code": "ProvisionedThroughputExceededException"}},
+		})
+		recorder := NewRecorder()
+		calls := 0
+		observe := func(stack *middleware.Stack) error {
+			return stack.Finalize.Insert(middleware.FinalizeMiddlewareFunc("observe-real-configuration-call", func(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (middleware.FinalizeOutput, middleware.Metadata, error) {
+				calls++
+				return next.HandleFinalize(ctx, in)
+			}), "configuration-fault", middleware.After)
+		}
+		client := e.NewClient(recorder.APIOption, tables.ConfigurationAPIOption(injection), observe)
+		input := configurationBatchInput(tables.names)
+		out, err := client.BatchGetItem(WithOperation(context.Background(), 0), input)
+		require.NoError(t, err)
+		require.Len(t, out.UnprocessedKeys, 1)
+		require.Equal(t, 1, calls)
+		_, err = client.BatchGetItem(WithOperation(context.Background(), 0), input)
+		var throughput *types.ProvisionedThroughputExceededException
+		require.ErrorAs(t, err, &throughput)
+		require.Equal(t, 1, calls, "request replacement must not invoke the real handler")
+		out, err = client.BatchGetItem(WithOperation(context.Background(), 0), input)
+		require.NoError(t, err)
+		require.Empty(t, out.UnprocessedKeys)
+		for _, name := range tables.names {
+			require.Len(t, out.Responses[name], 1)
+			require.Equal(t, &types.AttributeValueMemberS{Value: "ordered-seed"}, out.Responses[name][0]["store_id"])
+		}
+		require.Equal(t, 2, calls)
+		require.Len(t, recorder.Requests(0), 3)
+		require.NoError(t, finish())
+	})
 	t.Run("unsupported and other-operation faults remain unfired", func(t *testing.T) {
 		tables, _ := createTables(t, e, false)
 		injection, finish := conformance.NewInitializationInjection([]conformance.FaultSpec{
@@ -172,26 +285,55 @@ func TestConfigurationSDKConcurrentFaultApplications(t *testing.T) {
 	require.NoError(t, tables.PutConfigurationItems(context.Background(), configurationFixtureInputs("parallel-seed")))
 	injection, finish := conformance.NewInitializationInjection([]conformance.FaultSpec{{Operation: 0, Phase: "configuration-read", Kind: "sdk-response", Repeat: "count", Count: 7, Injection: "replace-response", Details: map[string]any{"unprocessed_keys": []any{"head:__config__"}}}})
 	recorder := NewRecorder()
-	client := e.NewClient(recorder.APIOption, tables.ConfigurationAPIOption(injection))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	arrived := make(chan struct{}, 40)
+	release := make(chan struct{})
+	gate := func(stack *middleware.Stack) error {
+		return stack.Finalize.Insert(middleware.FinalizeMiddlewareFunc("concurrent-real-configuration-calls", func(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (middleware.FinalizeOutput, middleware.Metadata, error) {
+			arrived <- struct{}{}
+			select {
+			case <-release:
+				return next.HandleFinalize(ctx, in)
+			case <-ctx.Done():
+				return middleware.FinalizeOutput{}, middleware.Metadata{}, ctx.Err()
+			}
+		}), "configuration-fault", middleware.After)
+	}
+	client := e.NewClient(recorder.APIOption, tables.ConfigurationAPIOption(injection), gate)
 	type result struct {
 		out *dynamodb.BatchGetItemOutput
 		err error
 	}
 	results := make(chan result, 20)
 	var workers sync.WaitGroup
+	defer func() { cancel(); workers.Wait() }()
 	for i := 0; i < 20; i++ {
 		workers.Go(func() {
-			out, err := client.BatchGetItem(WithOperation(context.Background(), 0), configurationBatchInput(tables.names))
+			out, err := client.BatchGetItem(WithOperation(ctx, 0), configurationBatchInput(tables.names))
 			results <- result{out, err}
 		})
 	}
+	for i := 0; i < 20; i++ {
+		select {
+		case <-arrived:
+		case <-ctx.Done():
+			t.Fatal("real requests must reach the handler concurrently before fault application")
+		}
+	}
+	close(release)
 	workers.Wait()
+	require.Empty(t, arrived, "each request invokes the real handler exactly once")
 	close(results)
 	applied := 0
 	for result := range results {
 		require.NoError(t, result.err)
 		if len(result.out.UnprocessedKeys) > 0 {
 			applied++
+			require.Len(t, result.out.UnprocessedKeys, 1)
+		} else {
+			require.Len(t, result.out.Responses[tables.names["head"]], 1)
+			require.Equal(t, &types.AttributeValueMemberS{Value: "parallel-seed"}, result.out.Responses[tables.names["head"]][0]["store_id"])
 		}
 	}
 	require.Equal(t, 7, applied)

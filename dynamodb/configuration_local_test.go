@@ -744,6 +744,26 @@ func TestConfigurationLocalSDKCauses(t *testing.T) {
 		require.Empty(t, observedConfiguration(t, tables))
 		t.Logf("actual SDK cause: operation=%s code=%s type=%T", operation.OperationName, missing.ErrorCode(), missing)
 	})
+	t.Run("response replacement preserves initial SDK failure without firing", func(t *testing.T) {
+		tables, cfg := configurationTables(t, e, false)
+		_, err := e.NewClient().DeleteTable(context.Background(), &awsdynamodb.DeleteTableInput{TableName: aws.String(cfg.JournalTableName)})
+		require.NoError(t, err)
+		injection, finish := conformance.NewInitializationInjection([]conformance.FaultSpec{configurationReadFault([]string{"journal:__config__:0", "snapshot:__config__:0", "head:__config__"}, 1)})
+		recorder := dynamodbtest.NewRecorder()
+		state, err := open(dynamodbtest.WithOperation(context.Background(), 0), e.NewClient(recorder.APIOption, tables.ConfigurationAPIOption(injection)), cfg, nil)
+		require.Nil(t, state)
+		requireKind(t, err, eventstore.KindStorage)
+		var missing *types.ResourceNotFoundException
+		var operation *smithy.OperationError
+		require.ErrorAs(t, err, &missing)
+		require.ErrorAs(t, err, &operation)
+		require.Equal(t, "BatchGetItem", operation.OperationName)
+		require.ErrorIs(t, err, missing)
+		require.Len(t, recorder.Requests(0), 1)
+		require.Zero(t, injection.Faults[0].Fired())
+		require.ErrorContains(t, finish(), "fired 0 times, want exactly 1")
+		t.Logf("failed initial response replacement: operation=%s code=%s fired=%d required=1 requests=%d", operation.OperationName, missing.ErrorCode(), injection.Faults[0].Fired(), len(recorder.Requests(0)))
+	})
 	t.Run("actual create service failure", func(t *testing.T) {
 		tables, cfg := configurationTables(t, e, false)
 		removeHead := func(stack *middleware.Stack) error {
@@ -776,7 +796,7 @@ func TestConfigurationLocalSDKCauses(t *testing.T) {
 	})
 	t.Run("read re-request preserves actual SDK failure", func(t *testing.T) {
 		tables, cfg := configurationTables(t, e, false)
-		injection, finish := conformance.NewInitializationInjection([]conformance.FaultSpec{configurationReadFault([]string{"journal:__config__:0", "snapshot:__config__:0", "head:__config__"}, 1)})
+		injection, finish := conformance.NewInitializationInjection([]conformance.FaultSpec{configurationReadFault([]string{"journal:__config__:0", "snapshot:__config__:0", "head:__config__"}, 2)})
 		injection.Hooks.SetSleeper(func(time.Duration) {
 			_, err := e.NewClient().DeleteTable(context.Background(), &awsdynamodb.DeleteTableInput{TableName: aws.String(cfg.JournalTableName)})
 			require.NoError(t, err)
@@ -786,11 +806,15 @@ func TestConfigurationLocalSDKCauses(t *testing.T) {
 		require.Nil(t, state)
 		requireKind(t, err, eventstore.KindStorage)
 		var missing *types.ResourceNotFoundException
+		var operation *smithy.OperationError
 		require.ErrorAs(t, err, &missing)
+		require.ErrorAs(t, err, &operation)
+		require.Equal(t, "BatchGetItem", operation.OperationName)
 		require.ErrorIs(t, err, missing)
 		require.Len(t, recorder.Requests(0), 2)
-		require.NoError(t, finish())
-		t.Logf("actual SDK re-request cause: code=%s type=%T", missing.ErrorCode(), missing)
+		require.Equal(t, 1, injection.Faults[0].Fired())
+		require.ErrorContains(t, finish(), "fired 1 times, want exactly 2")
+		t.Logf("failed re-request response replacement: operation=%s code=%s fired=%d required=2 requests=%d", operation.OperationName, missing.ErrorCode(), injection.Faults[0].Fired(), len(recorder.Requests(0)))
 	})
 }
 

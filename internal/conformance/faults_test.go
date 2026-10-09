@@ -1,12 +1,62 @@
 package conformance
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/j5ik2o/event-store-adapter-go/v2/internal/testhook"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestFault_ApplicationSuccessCounting(t *testing.T) {
+	injection, finish := NewInitializationInjection([]FaultSpec{
+		countSpec(0, "configuration-read", "sdk-response", 1),
+		untilSpec(0, "configuration-create", "sdk-error"),
+		countSpec(1, "commit", "sdk-error", 1),
+	})
+	fault := injection.Faults[0]
+	require.True(t, fault.CanApply())
+	require.True(t, fault.CanApply())
+	require.Zero(t, fault.Fired(), "eligibility does not apply a replacement")
+	preparationError := errors.New("replacement preparation failed")
+	applied, err := fault.TryApplyWith(func() error { return preparationError })
+	require.False(t, applied)
+	require.ErrorIs(t, err, preparationError)
+	require.Zero(t, fault.Fired())
+	require.True(t, fault.CanApply(), "failed preparation does not consume the count")
+	applications := 0
+	apply := func() error { applications++; return nil }
+	applied, err = fault.TryApplyWith(apply)
+	require.True(t, applied)
+	require.NoError(t, err)
+	require.Equal(t, 1, applications)
+	require.Equal(t, 1, fault.Fired())
+	require.False(t, fault.CanApply())
+	applied, err = fault.TryApplyWith(apply)
+	require.False(t, applied)
+	require.NoError(t, err)
+	require.Equal(t, 1, applications, "exhausted count must not run the callback")
+	for i := 0; i < 2; i++ {
+		require.True(t, injection.Faults[1].CanApply())
+		applied, err = injection.Faults[1].TryApplyWith(apply)
+		require.True(t, applied)
+		require.NoError(t, err)
+	}
+	require.Equal(t, 2, injection.Faults[1].Fired())
+	require.False(t, injection.Faults[2].CanApply())
+	applied, err = injection.Faults[2].TryApplyWith(apply)
+	require.False(t, applied)
+	require.NoError(t, err)
+	require.Zero(t, injection.Faults[2].Fired())
+	require.Equal(t, 3, applications, "other-operation callback must not run")
+	require.ErrorContains(t, finish(), "operation 1")
+	require.False(t, injection.Faults[1].CanApply())
+	applied, err = injection.Faults[1].TryApplyWith(apply)
+	require.False(t, applied)
+	require.NoError(t, err)
+	require.Equal(t, 3, applications, "finished operation must not run the callback")
+}
 
 func countSpec(op int, phase, kind string, n int) FaultSpec {
 	return FaultSpec{Operation: op, Phase: phase, Kind: kind, Repeat: "count", Count: n}

@@ -65,16 +65,40 @@ func newFaults(specs []FaultSpec, cur *operationCursor) []*Fault {
 // TryApply reports whether the fault applies now and, if so, counts one firing. A fault applies
 // only while its operation runs, and a count fault stops after its count.
 func (f *Fault) TryApply() bool {
-	if f.cursor.get() != f.Spec.Operation {
-		return false
-	}
+	applied, _ := f.TryApplyWith(nil)
+	return applied
+}
+
+// CanApply checks the current operation and count without consuming a firing.
+// TryApplyWith checks them again when the prepared replacement is applied.
+func (f *Fault) CanApply() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.Spec.Repeat == repeatCount && f.fired >= f.Spec.Count {
-		return false
+	return f.canApply()
+}
+
+// TryApplyWith runs apply only while the fault is eligible, and counts it only
+// if apply succeeds. Eligibility, application, and counting share the existing
+// fault lock. Obtain a real SDK response before calling this method.
+func (f *Fault) TryApplyWith(apply func() error) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.canApply() {
+		return false, nil
+	}
+	if apply != nil {
+		if err := apply(); err != nil {
+			return false, err
+		}
 	}
 	f.fired++
-	return true
+	return true, nil
+}
+
+// canApply is called with f.mu held.
+func (f *Fault) canApply() bool {
+	return f.cursor.get() == f.Spec.Operation &&
+		(f.Spec.Repeat != repeatCount || f.fired < f.Spec.Count)
 }
 
 // Fired returns how many times the fault was applied.

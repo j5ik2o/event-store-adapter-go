@@ -66,40 +66,70 @@ func (t *Tables) ConfigurationAPIOption(injection conformance.Injection) func(*m
 		return stack.Finalize.Add(middleware.FinalizeMiddlewareFunc("configuration-fault", func(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (middleware.FinalizeOutput, middleware.Metadata, error) {
 			input := ctx.Value(configurationInputKey{})
 			phase := t.configurationPhase(input)
+			var out middleware.FinalizeOutput
+			var metadata middleware.Metadata
+			read := false
 			for _, fault := range injection.Faults {
-				if phase == "" || fault.Spec.Phase != phase || !configurationFaultSupported(fault.Spec) || !fault.TryApply() {
+				if phase == "" || fault.Spec.Phase != phase || !configurationFaultSupported(fault.Spec) || !fault.CanApply() {
 					continue
 				}
 				if fault.Spec.Injection == "replace-request" {
-					if raw, present := fault.Spec.Details["install_items"]; present {
-						list, ok := raw.([]any)
-						if !ok {
-							return middleware.FinalizeOutput{}, middleware.Metadata{}, fmt.Errorf("install_items is not an array")
-						}
-						fixtures := make([]map[string]any, len(list))
-						for i, entry := range list {
-							fixture, ok := entry.(map[string]any)
+					var replacement error
+					applied, err := fault.TryApplyWith(func() error {
+						if raw, present := fault.Spec.Details["install_items"]; present {
+							list, ok := raw.([]any)
 							if !ok {
-								return middleware.FinalizeOutput{}, middleware.Metadata{}, fmt.Errorf("install_items[%d] is not an object", i)
+								return fmt.Errorf("install_items is not an array")
 							}
-							fixtures[i] = fixture
+							fixtures := make([]map[string]any, len(list))
+							for i, entry := range list {
+								fixture, ok := entry.(map[string]any)
+								if !ok {
+									return fmt.Errorf("install_items[%d] is not an object", i)
+								}
+								fixtures[i] = fixture
+							}
+							if err := t.PutConfigurationItems(ctx, fixtures); err != nil {
+								return err
+							}
 						}
-						if err := t.PutConfigurationItems(ctx, fixtures); err != nil {
-							return middleware.FinalizeOutput{}, middleware.Metadata{}, err
-						}
+						replacement = t.configurationSDKError(input, fault.Spec.Details)
+						return nil
+					})
+					if err != nil {
+						return middleware.FinalizeOutput{}, middleware.Metadata{}, err
 					}
-					return middleware.FinalizeOutput{}, middleware.Metadata{}, t.configurationSDKError(input, fault.Spec.Details)
+					if applied {
+						return middleware.FinalizeOutput{}, middleware.Metadata{}, replacement
+					}
+					continue
 				}
-				out, metadata, err := next.HandleFinalize(ctx, in)
-				if err != nil {
+				if !read {
+					var err error
+					out, metadata, err = next.HandleFinalize(ctx, in)
+					if err != nil {
+						return out, metadata, err
+					}
+					read = true
+				}
+				applied, err := fault.TryApplyWith(func() error {
+					actual, ok := out.Result.(*dynamodb.BatchGetItemOutput)
+					if !ok {
+						return fmt.Errorf("configuration response is %T", out.Result)
+					}
+					partitioned, err := t.partitionConfigurationResponse(input.(*dynamodb.BatchGetItemInput), actual, fault.Spec.Details)
+					if err != nil {
+						return err
+					}
+					out.Result = partitioned
+					return nil
+				})
+				if err != nil || applied {
 					return out, metadata, err
 				}
-				actual, ok := out.Result.(*dynamodb.BatchGetItemOutput)
-				if !ok {
-					return out, metadata, fmt.Errorf("configuration response is %T", out.Result)
-				}
-				out.Result, err = t.partitionConfigurationResponse(input.(*dynamodb.BatchGetItemInput), actual, fault.Spec.Details)
-				return out, metadata, err
+			}
+			if read {
+				return out, metadata, nil
 			}
 			return next.HandleFinalize(ctx, in)
 		}), middleware.Before)
