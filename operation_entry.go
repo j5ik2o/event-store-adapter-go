@@ -119,6 +119,9 @@ func (s *operationEntry[E, A]) GetLatestSnapshotByID(ctx context.Context, id Agg
 func (s *operationEntry[E, A]) GetEventsByIDSinceSeqNr(ctx context.Context, id AggregateID, seqNr SeqNr) ([]EventEnvelope[E], error) {
 	aid, err := AidString(id)
 	if err != nil {
+		if violation, ok := err.(*ContractViolationError); ok {
+			violation.SeqNr = &seqNr
+		}
 		return nil, err
 	}
 	if err := seqNr.Validate(); err != nil {

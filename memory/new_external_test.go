@@ -3,6 +3,8 @@ package memory_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -427,6 +429,52 @@ func (id *changingDomainID) Value() string {
 		return "different"
 	}
 	return id.value
+}
+
+func TestNewReadIDFailuresPreserveRequestedSequence(t *testing.T) {
+	store, err := memory.NewStore()
+	require.NoError(t, err)
+	entry := newDomainStore(t, store)
+	for _, tc := range []struct {
+		name       string
+		id         func() eventstore.AggregateID
+		rule       string
+		valueCalls int
+	}{
+		{"nil", func() eventstore.AggregateID { return nil }, "T-2", 0},
+		{"typed nil", func() eventstore.AggregateID { return (*changingDomainID)(nil) }, "T-2", 0},
+		{"hyphen in type", func() eventstore.AggregateID {
+			return &changingDomainID{typeName: "Order-Item", value: "1"}
+		}, "T-11", 0},
+		{"too long", func() eventstore.AggregateID {
+			return &changingDomainID{typeName: "Order", value: strings.Repeat("x", 1024)}
+		}, "T-12", 1},
+	} {
+		for _, seqNr := range []eventstore.SeqNr{0, 2, -1, eventstore.MaxSeqNr + 1} {
+			t.Run(fmt.Sprintf("%s/since=%d", tc.name, seqNr), func(t *testing.T) {
+				id := tc.id()
+
+				result, err := entry.GetEventsByIDSinceSeqNr(t.Context(), id, seqNr)
+
+				require.Nil(t, result)
+				requireExternalKind(t, err, eventstore.KindContractViolation)
+				var violation *eventstore.ContractViolationError
+				require.ErrorAs(t, err, &violation)
+				assert.Equal(t, tc.rule, violation.Rule)
+				assert.Contains(t, err.Error(), tc.rule)
+				assert.Nil(t, violation.Unwrap())
+				if counted, ok := id.(*changingDomainID); ok && counted != nil {
+					assert.Equal(t, 1, counted.typeCalls)
+					assert.Equal(t, tc.valueCalls, counted.valueCalls)
+				}
+				t.Logf("rule=%s requested_seq_nr=%d diagnostic_seq_nr=%v message=%q",
+					violation.Rule, seqNr, violation.SeqNr, err.Error())
+				require.NotNil(t, violation.SeqNr)
+				assert.Equal(t, seqNr, *violation.SeqNr)
+				assert.Contains(t, err.Error(), fmt.Sprintf("seq_nr=%d", seqNr))
+			})
+		}
+	}
 }
 
 func TestNewUsesFixedExactAggregateID(t *testing.T) {

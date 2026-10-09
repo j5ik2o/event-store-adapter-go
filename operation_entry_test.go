@@ -190,26 +190,48 @@ func TestOperationEntryValidatesReadIDsBeforeBoundary(t *testing.T) {
 		{"hyphen in type", userID{"Order-Item", "1"}, "T-11"},
 		{"too long", userID{"Order", strings.Repeat("x", 1024)}, "T-12"},
 	} {
-		for _, snapshots := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/snapshots=%t", tc.name, snapshots), func(t *testing.T) {
+		for _, operation := range []struct {
+			name   string
+			events bool
+			seqNr  SeqNr
+		}{
+			{"snapshot", false, 0},
+			{"events since zero", true, 0},
+			{"events since positive", true, 2},
+			{"events since negative", true, -1},
+			{"events since above maximum", true, MaxSeqNr + 1},
+		} {
+			t.Run(tc.name+"/"+operation.name, func(t *testing.T) {
 				boundary := &entryBoundary{}
 				store, eventSerializer, snapshotSerializer := newEntryForTest(t, boundary)
 
 				var err error
-				if snapshots {
+				if !operation.events {
 					var result *SnapshotRead[string]
 					result, err = store.GetLatestSnapshotByID(context.Background(), tc.id)
 					assert.Nil(t, result)
 				} else {
 					var result []EventEnvelope[string]
-					result, err = store.GetEventsByIDSinceSeqNr(context.Background(), tc.id, 0)
+					result, err = store.GetEventsByIDSinceSeqNr(context.Background(), tc.id, operation.seqNr)
 					assert.Nil(t, result)
 				}
 
-				requireContractViolation(t, err, tc.rule)
+				violation := requireContractViolation(t, err, tc.rule)
+				assert.Nil(t, violation.Unwrap())
 				assert.Zero(t, boundary.calls())
+				assert.Zero(t, eventSerializer.serializeCalls)
+				assert.Zero(t, snapshotSerializer.serializeCalls)
 				assert.Zero(t, eventSerializer.deserializeCalls)
 				assert.Zero(t, snapshotSerializer.deserializeCalls)
+				if operation.events {
+					t.Logf("rule=%s requested_seq_nr=%d diagnostic_seq_nr=%v message=%q boundary_calls=%d serializer_calls=0",
+						violation.Rule, operation.seqNr, violation.SeqNr, err.Error(), boundary.calls())
+					require.NotNil(t, violation.SeqNr)
+					assert.Equal(t, operation.seqNr, *violation.SeqNr)
+					assert.Contains(t, err.Error(), fmt.Sprintf("seq_nr=%d", operation.seqNr))
+				} else {
+					assert.Nil(t, violation.SeqNr)
+				}
 			})
 		}
 	}
