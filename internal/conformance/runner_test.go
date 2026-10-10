@@ -1,65 +1,69 @@
-package conformance
+package conformance_test
 
 import (
-	"encoding/json"
+	"context"
 	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/j5ik2o/event-store-adapter-go/v2/internal/conformance"
+	"github.com/j5ik2o/event-store-adapter-go/v2/internal/dynamodbtest"
+	"github.com/stretchr/testify/require"
 )
 
-// TestConformance is the entry point used by CI: it loads the data, verifies the manifest,
-// classifies every case, evaluates required.json, always writes the report, and only then decides failure.
-// It runs only in the conformance CI job, which sets CONFORMANCE_REPORT to the report path.
+// TestConformance preserves the existing CI entry and artifact path.
 func TestConformance(t *testing.T) {
 	path := os.Getenv("CONFORMANCE_REPORT")
 	if path == "" {
-		t.Skip("CONFORMANCE_REPORT is not set; this entry point runs in the conformance CI job")
+		t.Skip("CONFORMANCE_REPORT is not set")
 	}
-	var errs []string
-	root := dataRoot()
+	ctx := context.Background()
+	root := filepath.Join("..", "..", "conformance")
+	manifest, err := conformance.VerifyManifest(root)
+	require.NoError(t, err)
+	data, err := conformance.LoadData(root)
+	require.NoError(t, err)
+	required, err := conformance.LoadRequired("required.json")
+	require.NoError(t, err)
+	require.NoError(t, conformance.CheckRequiredCoverage(data, required))
+	environment, err := dynamodbtest.Start(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, environment.Close(context.Background())) })
+	var results []conformance.CaseResult
+	for _, backend := range []*publicBackend{{name: "memory"}, {name: "dynamodb", environment: environment}} {
+		actual := conformance.RunBackend(ctx, data, backend)
+		results = append(results, actual...)
+		gate, err := conformance.EvaluateRequired(conformance.RequiredList{backend.name: required[backend.name]}, actual)
+		require.NoError(t, err)
+		report := conformance.BuildReport(manifest, actual, data.Exclusions, gate, nil)
+		report.Backends = []conformance.BackendState{{Name: backend.name, Connected: true}}
+		require.NoError(t, conformance.WriteReport(filepath.Join(filepath.Dir(path), backend.name+"-conformance-report.json"), report))
+	}
+	gate, err := conformance.EvaluateRequired(required, results)
+	require.NoError(t, err)
+	report := conformance.BuildReport(manifest, results, data.Exclusions, gate, nil)
+	report.Backends = []conformance.BackendState{{Name: "memory", Connected: true}, {Name: "dynamodb", Connected: true}}
+	require.NoError(t, conformance.WriteReport(path, report))
+	for _, result := range results {
+		if result.Status == conformance.StatusFailure || result.Status == conformance.StatusUnverified {
+			t.Errorf("%s/%s: %s", result.Backend, result.ID, result.Reason)
+		}
+	}
+	require.Empty(t, report.FailureReasons())
+}
 
-	m, err := VerifyManifest(root)
-	if err != nil {
-		errs = append(errs, "manifest: "+err.Error())
+func TestPublicMemoryConformance(t *testing.T) {
+	data, err := conformance.LoadData(filepath.Join("..", "..", "conformance"))
+	require.NoError(t, err)
+	results := conformance.RunBackend(context.Background(), data, &publicBackend{name: "memory"})
+	success := 0
+	for _, result := range results {
+		if result.Status == conformance.StatusSuccess {
+			success++
+		}
+		if result.Status == conformance.StatusFailure || result.Status == conformance.StatusUnverified {
+			t.Errorf("%s: %s", result.ID, result.Reason)
+		}
 	}
-
-	var results []CaseResult
-	var excluded []RuleExclusion
-	d, err := LoadData(root)
-	if err != nil {
-		errs = append(errs, "load: "+err.Error())
-	} else {
-		results = classifyCases(d)
-		excluded = d.Exclusions
-	}
-
-	var gate GateResult
-	req, err := LoadRequired("required.json")
-	if err != nil {
-		errs = append(errs, "required: "+err.Error())
-	} else if g, err := EvaluateRequired(req, results); err != nil {
-		errs = append(errs, "required: "+err.Error())
-	} else {
-		gate = g
-	}
-
-	rep := BuildReport(m, results, excluded, gate, errs)
-
-	if err := WriteReport(path, rep); err != nil {
-		t.Fatalf("write report: %v", err)
-	}
-
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read report: %v", err)
-	}
-	var top struct {
-		Summary map[string]int `json:"summary"`
-	}
-	if err := json.Unmarshal(b, &top); err != nil {
-		t.Fatalf("report is not valid json: %v", err)
-	}
-	t.Logf("summary: %v", top.Summary)
-	if reasons := rep.FailureReasons(); len(reasons) > 0 {
-		t.Fatalf("conformance failed: %v", reasons)
-	}
+	require.Equal(t, len(conformance.ApplicableCases(data, "memory")), success)
 }

@@ -1,6 +1,7 @@
 package conformance
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -13,41 +14,18 @@ import (
 
 var statusKeys = []string{"success", "failure", "not-applicable", "unverified", "unrepresentable"}
 
-func loadClassified(t *testing.T) []CaseResult {
-	t.Helper()
-	d, err := LoadData(dataRoot())
-	require.NoError(t, err)
-	return classifyCases(d)
-}
-
-func TestClassify(t *testing.T) {
-	results := loadClassified(t)
-	counts := map[Status]int{}
-	for _, r := range results {
-		counts[r.Status]++
-		if r.Status != StatusSuccess {
-			assert.NotEmpty(t, r.Reason, r.ID)
-		}
+func reportResults() []CaseResult {
+	return []CaseResult{
+		{ID: "s", Backend: "memory", Rules: []string{"W-1"}, Status: StatusSuccess},
+		{ID: "f", Backend: "memory", Rules: []string{"W-1"}, Status: StatusFailure, Reason: "mismatch"},
+		{ID: "n", Backend: "memory", Rules: []string{"K-1"}, Status: StatusNotApplicable, Reason: reasonFnv1a64},
+		{ID: "u", Backend: "dynamodb", Rules: []string{"W-1"}, Status: StatusUnverified, Reason: reasonNoBackend},
+		{ID: "r", Backend: "memory", Rules: []string{"T-9"}, Status: StatusUnrepresentable, Reason: "integer does not fit"},
 	}
-	assert.Equal(t, 15, counts[Status("success")])
-	assert.Equal(t, 0, counts[Status("failure")])
-	assert.Equal(t, 16, counts[Status("not-applicable")])
-	assert.Equal(t, 127, counts[Status("unverified")])
-	assert.Equal(t, 0, counts[Status("unrepresentable")])
-
-	byID := map[string]CaseResult{}
-	for _, r := range results {
-		byID[r.ID] = r
-	}
-	for _, id := range []string{"hash-fnv1a64-1", "occurred-at-millisecond-min-inside", "core-time-millisecond-below-min"} {
-		require.Contains(t, byID, id)
-		assert.Equal(t, Status("not-applicable"), byID[id].Status, id)
-	}
-	assert.Equal(t, StatusSuccess, byID["seq-zero-value"].Status)
 }
 
 func TestReport(t *testing.T) {
-	results := loadClassified(t)
+	results := reportResults()
 	m := ManifestResult{Version: "1.0.0", Verified: true, FileCount: 22}
 	gate := GateResult{Lists: RequiredList{"memory": {}, "dynamodb": {}}}
 	rep := BuildReport(m, results, nil, gate, nil)
@@ -67,16 +45,16 @@ func TestReport(t *testing.T) {
 	for _, k := range statusKeys {
 		assert.Contains(t, summary, k)
 	}
-	assert.EqualValues(t, 15, summary["success"])
-	assert.EqualValues(t, 16, summary["not-applicable"])
-	assert.EqualValues(t, 127, summary["unverified"])
+	for _, status := range statusKeys {
+		assert.EqualValues(t, 1, summary[status])
+	}
 	cases, ok := top["cases"].([]any)
 	require.True(t, ok)
-	assert.Len(t, cases, 158, "one result per case id and backend")
+	assert.Len(t, cases, 5, "one result per case id and backend")
 }
 
 func TestReport_RulesCountEveryStatus(t *testing.T) {
-	results := loadClassified(t)
+	results := reportResults()
 	rep := BuildReport(ManifestResult{Verified: true}, results, nil, GateResult{}, nil)
 	b, err := json.Marshal(rep)
 	require.NoError(t, err)
@@ -96,7 +74,7 @@ func TestReport_RulesCountEveryStatus(t *testing.T) {
 
 func TestFailureReasons(t *testing.T) {
 	okReport := func() Report {
-		return BuildReport(ManifestResult{Verified: true}, loadClassified(t), nil, GateResult{}, nil)
+		return BuildReport(ManifestResult{Verified: true}, reportResults(), nil, GateResult{}, nil)
 	}
 
 	t.Run("no reasons when nothing is wrong", func(t *testing.T) {
@@ -122,31 +100,36 @@ func TestFailureReasons(t *testing.T) {
 	})
 }
 
-func TestClassify_PerBackend(t *testing.T) {
+func TestRunBackend_PerBackend(t *testing.T) {
 	d := &Data{
-		Scenarios: []ScenarioCase{{ID: "s", Rules: []string{"T-1"}, Backends: []string{"memory", "dynamodb"}}},
+		Scenarios: []ScenarioCase{{ID: "s", Rules: []string{"T-1"}, Backends: []string{"memory", "dynamodb"}, Plan: &ScenarioPlan{}}},
 		Layouts:   []LayoutCase{{ID: "l", Rules: []string{"L-1"}}},
 		Values: []ValueCase{{ID: "v", Operation: "buildAid",
 			Input:  ValueInput{Raw: map[string]any{"aggregate_id": map[string]any{"type_name": "Order", "value": "1"}}},
 			Expect: map[string]any{"value": "Order-1"}}},
 	}
-	got := classifyCases(d)
+	var got []CaseResult
+	for _, name := range []string{"memory", "dynamodb"} {
+		got = append(got, RunBackend(context.Background(), d, &fakeBackend{name: name})...)
+	}
 	type key struct{ id, backend string }
 	seen := map[key]Status{}
 	for _, r := range got {
 		seen[key{r.ID, r.Backend}] = r.Status
 	}
-	assert.Len(t, got, 4)
+	assert.Len(t, got, 6)
 	assert.Contains(t, seen, key{"s", "memory"})
 	assert.Contains(t, seen, key{"s", "dynamodb"})
 	assert.Contains(t, seen, key{"l", "dynamodb"})
-	assert.Contains(t, seen, key{"v", ""})
+	assert.Contains(t, seen, key{"l", "memory"})
+	assert.Contains(t, seen, key{"v", "memory"})
+	assert.Contains(t, seen, key{"v", "dynamodb"})
 }
 
 func TestReport_ExcludedRules(t *testing.T) {
 	d, err := LoadData(dataRoot())
 	require.NoError(t, err)
-	rep := BuildReport(ManifestResult{Verified: true}, classifyCases(d), d.Exclusions, GateResult{}, nil)
+	rep := BuildReport(ManifestResult{Verified: true}, reportResults(), d.Exclusions, GateResult{}, nil)
 	b, err := json.Marshal(rep)
 	require.NoError(t, err)
 	var top struct {

@@ -10,8 +10,6 @@ import (
 	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
 )
 
-const reasonTimeNoBackend = "時刻の値表は書込み・読戻しを要求するが、保存先に未接続（設計 5.1）"
-
 // valueAggregateID deliberately has a caller-defined representation in addition to
 // the two core ID methods. buildAid must use the latter, not userString.
 type valueAggregateID struct {
@@ -25,7 +23,7 @@ func (id valueAggregateID) String() string   { return id.userString }
 func (id valueAggregateID) AsString() string { return id.userString }
 
 // runValueCase invokes core validation rather than duplicating its rules.
-// Time cases remain unverified until actual storage and readback are connected.
+// Time cases are dispatched to runTimeCase by RunBackend.
 func runValueCase(c ValueCase) CaseResult {
 	res := CaseResult{ID: c.ID, Rules: nonNil(c.Rules), Expected: c.Expect}
 	var value any
@@ -66,9 +64,6 @@ func runValueCase(c ValueCase) CaseResult {
 		default:
 			err = fmt.Errorf("unsupported seq_nr context %v", c.Input.Raw["context"])
 		}
-	case "validateOccurredAt":
-		res.Status, res.Reason = StatusUnverified, reasonTimeNoBackend
-		return res
 	default:
 		err = fmt.Errorf("unsupported value operation %q", c.Operation)
 	}

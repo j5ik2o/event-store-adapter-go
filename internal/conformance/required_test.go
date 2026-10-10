@@ -10,24 +10,19 @@ import (
 )
 
 func TestLoadRequired(t *testing.T) {
-	t.Run("the shipped list requires connected ID and sequence-number cases", func(t *testing.T) {
+	t.Run("the shipped list requires every applicable distributed case", func(t *testing.T) {
 		req, err := LoadRequired("required.json")
 		require.NoError(t, err)
 		d, err := LoadData(dataRoot())
 		require.NoError(t, err)
-		var expected []string
-		for _, c := range d.Values {
-			if c.Operation == "buildAid" || c.Operation == "validateSeqNr" {
-				expected = append(expected, c.ID)
-			}
-		}
-		require.Len(t, expected, 15)
 		assert.Len(t, req, 2)
-		for _, k := range []string{"memory", "dynamodb"} {
-			v, ok := req[k]
-			assert.True(t, ok, k)
-			assert.ElementsMatch(t, expected, v, k)
-		}
+		assert.Len(t, req["memory"], 60)
+		assert.Len(t, req["dynamodb"], 104)
+		require.NoError(t, CheckRequiredCoverage(d, req))
+		deleteOne := RequiredList{"memory": req["memory"][1:], "dynamodb": req["dynamodb"]}
+		require.Error(t, CheckRequiredCoverage(d, deleteOne))
+		addExcluded := RequiredList{"memory": append(append([]string{}, req["memory"]...), "fnv-empty"), "dynamodb": req["dynamodb"]}
+		require.Error(t, CheckRequiredCoverage(d, addExcluded))
 	})
 
 	write := func(t *testing.T, body string) string {
@@ -55,9 +50,22 @@ func TestLoadRequired(t *testing.T) {
 }
 
 func TestRequiredCoreValues(t *testing.T) {
-	req, err := LoadRequired("required.json")
+	d, err := LoadData(dataRoot())
 	require.NoError(t, err)
-	results := loadClassified(t)
+	req := RequiredList{"memory": {}, "dynamodb": {}}
+	for _, c := range d.Values {
+		if c.Operation == "buildAid" || c.Operation == "validateSeqNr" {
+			for _, name := range requiredBackends {
+				req[name] = append(req[name], c.ID)
+			}
+		}
+	}
+	var results []CaseResult
+	for _, c := range d.Values {
+		if contains(req["memory"], c.ID) {
+			results = append(results, runValueCase(c))
+		}
+	}
 	gate, err := EvaluateRequired(req, results)
 	require.NoError(t, err)
 	assert.Empty(t, gate.Violations)
@@ -91,6 +99,10 @@ func TestEvaluateRequired(t *testing.T) {
 		{ID: "split", Status: Status("success"), Reason: "r", Backend: "memory"},
 		{ID: "split", Status: Status("unverified"), Reason: "r", Backend: "dynamodb"},
 	}
+	t.Run("duplicate backend results are a runner error", func(t *testing.T) {
+		_, err := EvaluateRequired(RequiredList{"memory": {"s"}, "dynamodb": {}}, append(results, results[5]))
+		require.Error(t, err)
+	})
 
 	t.Run("empty list has no violations", func(t *testing.T) {
 		g, err := EvaluateRequired(RequiredList{"memory": {}, "dynamodb": {}}, results)

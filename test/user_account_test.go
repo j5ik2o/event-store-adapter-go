@@ -2,117 +2,76 @@ package test
 
 import (
 	"fmt"
-	esag "github.com/j5ik2o/event-store-adapter-go/v2/pkg"
-	"math/rand"
+	"testing"
 	"time"
 
-	"github.com/oklog/ulid/v2"
+	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
+	"github.com/stretchr/testify/require"
 )
 
-type userAccountId struct {
-	Value string
-}
+type userAccountID string
 
-func newUserAccountId(value string) userAccountId {
-	return userAccountId{Value: value}
-}
-
-func (id *userAccountId) GetTypeName() string {
-	return "UserAccountId"
-}
-
-func (id *userAccountId) GetValue() string {
-	return id.Value
-}
-
-func (id *userAccountId) String() string {
-	return fmt.Sprintf("userAccount{TypeName: %s, Valuie: %s}", id.GetTypeName(), id.Value)
-}
-
-func (id *userAccountId) AsString() string {
-	return fmt.Sprintf("%s-%s", id.GetTypeName(), id.Value)
-}
+func (id userAccountID) TypeName() string { return "UserAccount" }
+func (id userAccountID) Value() string    { return string(id) }
 
 type userAccount struct {
-	Id      userAccountId
-	Name    string
-	SeqNr   uint64
-	Version uint64
+	ID    userAccountID `json:"id"`
+	Name  string        `json:"name"`
+	seqNr eventstore.SeqNr
 }
 
-func newUserAccount(id userAccountId, name string) (*userAccount, *userAccountCreated) {
-	aggregate := userAccount{
-		Id:      id,
-		Name:    name,
-		SeqNr:   0,
-		Version: 1,
-	}
-	aggregate.SeqNr += 1
-	eventId := newULID()
-	return &aggregate, newUserAccountCreated(eventId.String(), &id, aggregate.SeqNr, name, uint64(time.Now().UnixNano()))
+func newUserAccount(id userAccountID, name string) (*userAccount, userAccountEvent) {
+	return &userAccount{ID: id, Name: name, seqNr: 1}, userAccountEvent{Kind: "created", Name: name}
 }
-
-func replayUserAccount(events []esag.Event, snapshot *userAccount) *userAccount {
+func (account *userAccount) Rename(name string) (*userAccount, userAccountEvent) {
+	next := *account
+	next.Name = name
+	next.seqNr++
+	return &next, userAccountEvent{Kind: "name-changed", Name: name}
+}
+func replayUserAccount(id userAccountID, events []eventstore.EventEnvelope[userAccountEvent], snapshot *userAccount) (*userAccount, error) {
 	result := snapshot
-	for _, event := range events {
-		result = result.applyEvent(event)
-	}
-	return result
-}
-
-func (ua *userAccount) applyEvent(event esag.Event) *userAccount {
-	switch e := event.(type) {
-	case *userAccountNameChanged:
-		update, err := ua.Rename(e.Name)
-		if err != nil {
-			panic(err)
+	for _, envelope := range events {
+		payload := envelope.Payload()
+		switch payload.Kind {
+		case "created":
+			result = &userAccount{ID: id, Name: payload.Name}
+		case "name-changed":
+			if result == nil {
+				return nil, fmt.Errorf("name change precedes account creation")
+			}
+			next := *result
+			next.Name = payload.Name
+			result = &next
+		default:
+			return nil, fmt.Errorf("unknown user account event %q", payload.Kind)
 		}
-		return update.Aggregate
+		result.seqNr = envelope.SeqNr()
 	}
-	return ua
+	return result, nil
 }
 
-func (ua *userAccount) String() string {
-	return fmt.Sprintf("UserAccount{Id: %s, Name: %s}", ua.Id.String(), ua.Name)
-}
-
-func (ua *userAccount) GetId() esag.AggregateId {
-	return &ua.Id
-}
-
-func (ua *userAccount) GetSeqNr() uint64 {
-	return ua.SeqNr
-}
-
-func (ua *userAccount) GetVersion() uint64 {
-	return ua.Version
-}
-
-func (ua *userAccount) WithVersion(version uint64) esag.Aggregate {
-	result := *ua
-	result.Version = version
-	return &result
-}
-
-type userAccountResult struct {
-	Aggregate *userAccount
-	Event     *userAccountNameChanged
-}
-
-func (ua *userAccount) Rename(name string) (*userAccountResult, error) {
-	updatedUserAccount := *ua
-	updatedUserAccount.Name = name
-	updatedUserAccount.SeqNr += 1
-	event := newUserAccountNameChanged(newULID().String(), &ua.Id, updatedUserAccount.SeqNr, name, uint64(time.Now().UnixNano()))
-	return &userAccountResult{&updatedUserAccount, event}, nil
-}
-
-func (ua *userAccount) Equals(other *userAccount) bool {
-	return ua.Id.Value == other.Id.Value && ua.Name == other.Name
-}
-
-func newULID() ulid.ULID {
-	t := time.Now()
-	entropy := ulid.Monotonic(rand.New(rand.NewSource(t.UnixNano())), 0)
-	return ulid.MustNew(ulid.Timestamp(t), entropy)
+func TestReplayUserAccount(t *testing.T) {
+	id := userAccountID("1")
+	initial, created := newUserAccount(id, "first")
+	renamed, changed := initial.Rename("second")
+	require.Equal(t, eventstore.SeqNr(1), initial.seqNr)
+	require.Equal(t, "first", initial.Name)
+	at := time.Unix(1, 0)
+	first, err := eventstore.NewEventEnvelope(id, initial.seqNr, at, created)
+	require.NoError(t, err)
+	second, err := eventstore.NewEventEnvelope(id, renamed.seqNr, at, changed)
+	require.NoError(t, err)
+	fromEvents, err := replayUserAccount(id, []eventstore.EventEnvelope[userAccountEvent]{first, second}, nil)
+	require.NoError(t, err)
+	require.Equal(t, renamed, fromEvents)
+	fromSnapshot, err := replayUserAccount(id, []eventstore.EventEnvelope[userAccountEvent]{second}, initial)
+	require.NoError(t, err)
+	require.Equal(t, renamed, fromSnapshot)
+	_, err = replayUserAccount(id, []eventstore.EventEnvelope[userAccountEvent]{second}, nil)
+	require.Error(t, err)
+	unknown, err := eventstore.NewEventEnvelope(id, eventstore.SeqNr(1), at, userAccountEvent{Kind: "unknown"})
+	require.NoError(t, err)
+	_, err = replayUserAccount(id, []eventstore.EventEnvelope[userAccountEvent]{unknown}, nil)
+	require.Error(t, err)
 }

@@ -1,7 +1,6 @@
 package conformance
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -21,17 +20,33 @@ const (
 
 var allStatuses = []Status{StatusSuccess, StatusFailure, StatusNotApplicable, StatusUnverified, StatusUnrepresentable}
 
-// CaseResult is the report entry of one case on one backend. Value-table cases have no
-// backend, so Backend is empty for them.
+// CaseResult is the report entry of one case on one backend. RunBackend assigns
+// that backend to value-table cases as well as scenarios and layout cases.
 type CaseResult struct {
-	ID         string   `json:"id"`
-	Rules      []string `json:"rules"`
-	Backend    string   `json:"backend,omitempty"`
-	Status     Status   `json:"status"`
-	Reason     string   `json:"reason"`
-	FailedStep *int     `json:"failed_step"`
-	Expected   any      `json:"expected"`
-	Actual     any      `json:"actual"`
+	ID         string            `json:"id"`
+	Rules      []string          `json:"rules"`
+	Backend    string            `json:"backend,omitempty"`
+	Status     Status            `json:"status"`
+	Reason     string            `json:"reason"`
+	FailedStep *int              `json:"failed_step"`
+	Expected   any               `json:"expected"`
+	Actual     any               `json:"actual"`
+	Faults     []FaultResult     `json:"faults,omitempty"`
+	Operations []OperationResult `json:"operations,omitempty"`
+}
+
+// FaultResult records declaration order and actual application, even on failure.
+type FaultResult struct {
+	Declaration int       `json:"declaration"`
+	Spec        FaultSpec `json:"spec"`
+	Applied     int       `json:"applied"`
+	Unfired     bool      `json:"unfired"`
+}
+
+type OperationResult struct {
+	Number      int `json:"number"`
+	Result      any `json:"result"`
+	Observation any `json:"observation,omitempty"`
 }
 
 // Implementation identifies the implementation under test.
@@ -66,31 +81,6 @@ const (
 	reasonMillis          = "Go の time.Time はナノ秒精度であり、representation.time_precision が milliseconds のケースは対象外（設計 5.1）"
 	reasonLayoutNoBackend = "配置照合は実行していない。DynamoDB に未接続（設計 7.2 の4番）"
 )
-
-// classifyCases decides the status and the reason of every case on every backend it targets.
-// Scenarios go through the scenario runner; no backend is connected, so they are either
-// not-applicable or unverified. ID and sequence-number values execute against the core;
-// time and layout cases remain unverified without storage backends.
-func classifyCases(d *Data) []CaseResult {
-	var out []CaseResult
-	for _, c := range d.Values {
-		r := CaseResult{ID: c.ID, Rules: nonNil(c.Rules)}
-		switch {
-		case c.Operation == "fnv1a64":
-			r.Status, r.Reason = StatusNotApplicable, reasonFnv1a64
-		case c.TimePrecision == "milliseconds":
-			r.Status, r.Reason = StatusNotApplicable, reasonMillis
-		default:
-			r = runValueCase(c)
-		}
-		out = append(out, r)
-	}
-	out = append(out, runScenarioCases(context.Background(), d.Scenarios, nil)...)
-	for _, c := range d.Layouts {
-		out = append(out, CaseResult{ID: c.ID, Rules: nonNil(c.Rules), Backend: "dynamodb", Status: StatusUnverified, Reason: reasonLayoutNoBackend})
-	}
-	return out
-}
 
 func nonNil(s []string) []string {
 	if s == nil {

@@ -23,6 +23,9 @@ func open(ctx context.Context, client *awsdynamodb.Client, cfg Config, hooks *te
 	if err != nil {
 		return nil, err
 	}
+	if hooks == nil {
+		hooks = validated.common.Hooks
+	}
 	items, err := readConfiguration(ctx, client, validated, hooks)
 	if err != nil {
 		return nil, err

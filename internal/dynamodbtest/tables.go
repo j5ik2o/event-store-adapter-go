@@ -16,6 +16,9 @@ import (
 
 type Table string
 
+// HistoryIndexName is the actual independently provisioned snapshot index.
+func (t *Tables) HistoryIndexName() string { return t.index }
+
 // Tables tracks this scenario's table creation attempts, excluding confirmed name conflicts.
 type Tables struct {
 	client *dynamodb.Client
