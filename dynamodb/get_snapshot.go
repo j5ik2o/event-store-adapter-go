@@ -88,6 +88,15 @@ func (s *opened) waitForSnapshotRetry(ctx context.Context, delay time.Duration) 
 	if cause := context.Cause(ctx); cause != nil {
 		return cause
 	}
+	if s.hooks == nil {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+		case <-timer.C:
+		}
+		return context.Cause(ctx)
+	}
 	completed := make(chan struct{})
 	go func() {
 		s.hooks.Sleep(delay)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -194,6 +195,83 @@ func TestDynamoDBSnapshotUnitContextCancellation(t *testing.T) {
 			require.Equal(t, tc.calls, calls)
 			require.Len(t, r.Requests(1), tc.calls)
 			require.Equal(t, int32(tc.waits), waits.Load())
+		})
+	}
+}
+
+func TestDynamoDBSnapshotUnitDefaultRetryWait(t *testing.T) {
+	for _, ending := range []string{"before wait", "cancel", "deadline", "normal", "normal cap"} {
+		t.Run(ending, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				store := &opened{}
+				ctx, cancel := context.WithCancelCause(t.Context())
+				defer cancel(nil)
+				cause := errors.New("snapshot caller canceled")
+				delay := time.Second
+				if ending == "normal" {
+					delay = 50 * time.Millisecond
+				}
+				const deadline = 10 * time.Millisecond
+				if ending == "deadline" {
+					var stop context.CancelFunc
+					ctx, stop = context.WithTimeout(ctx, deadline)
+					defer stop()
+					cause = context.DeadlineExceeded
+				}
+				start := time.Now()
+				if ending == "before wait" {
+					cancel(cause)
+					require.ErrorIs(t, store.waitForSnapshotRetry(ctx, delay), cause)
+					require.Zero(t, time.Since(start))
+					return
+				}
+				result := make(chan error, 1)
+				go func() { result <- store.waitForSnapshotRetry(ctx, delay) }()
+				synctest.Wait()
+				require.NoError(t, ctx.Err(), "Context must be active when the default retry wait starts")
+				select {
+				case <-result:
+					t.Fatal("default retry wait returned before cancellation or its duration")
+				default:
+				}
+
+				var elapsed time.Duration
+				switch ending {
+				case "cancel":
+					cancel(cause)
+				case "deadline":
+					elapsed = deadline
+					time.Sleep(deadline - time.Nanosecond)
+					synctest.Wait()
+					require.NoError(t, ctx.Err())
+					time.Sleep(time.Nanosecond)
+				case "normal", "normal cap":
+					elapsed = delay
+					time.Sleep(delay - time.Nanosecond)
+					synctest.Wait()
+					select {
+					case <-result:
+						t.Fatal("default retry wait completed before its full duration")
+					default:
+					}
+					time.Sleep(time.Nanosecond)
+				}
+				synctest.Wait()
+				select {
+				case err := <-result:
+					if ending == "normal" || ending == "normal cap" {
+						require.NoError(t, err)
+						require.NoError(t, ctx.Err())
+					} else {
+						require.ErrorIs(t, err, cause)
+						require.Equal(t, cause, context.Cause(ctx))
+					}
+				case <-time.After(delay):
+					t.Fatal("default retry wait did not terminate")
+				}
+				require.Equal(t, elapsed, time.Since(start))
+				t.Logf("default wait: %s, elapsed=%s, cause=%v; isolated wait must terminate before the test returns", ending, time.Since(start), context.Cause(ctx))
+			})
 		})
 	}
 }
