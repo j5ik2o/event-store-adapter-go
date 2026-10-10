@@ -10,8 +10,7 @@ import (
 	"github.com/j5ik2o/event-store-adapter-go/v2/internal/testhook"
 )
 
-// opened is the confirmed configuration, not a four-operation EventStore.
-// The product operations and public New are connected in the integration work.
+// opened owns the confirmed configuration and the byte-oriented storage boundary.
 type opened struct {
 	client   *awsdynamodb.Client
 	settings settings

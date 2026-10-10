@@ -1,4 +1,4 @@
-// Package dynamodb provides configuration opening for the three-table layout.
+// Package dynamodb provides an event store using the three-table DynamoDB layout.
 package dynamodb
 
 import (
