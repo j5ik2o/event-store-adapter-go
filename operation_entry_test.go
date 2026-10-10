@@ -486,3 +486,56 @@ func TestPrepareEventFailures(t *testing.T) {
 		assert.Empty(t, prepared.AggregateID())
 	}
 }
+
+func TestPrepareEventAndSnapshot(t *testing.T) {
+	event, err := NewEventEnvelope(userID{"Order", "pair"}, 1, time.Unix(0, -1), "event", WithManifest("event/型"))
+	require.NoError(t, err)
+	snapshot, err := NewSnapshotEnvelope("state", 1, WithManifest("state/型"))
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name     string
+		event    EventEnvelope[string]
+		snapshot SnapshotEnvelope[string]
+		rule     string
+	}{
+		{"event", EventEnvelope[string]{}, snapshot, "T-2"},
+		{"snapshot", event, SnapshotEnvelope[string]{}, "T-10"},
+		{"number", event, func() SnapshotEnvelope[string] {
+			s, e := NewSnapshotEnvelope("state", 2)
+			require.NoError(t, e)
+			return s
+		}(), "W-9"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			serializer := &entrySerializer{base: NewJSONSerializer[string]()}
+			_, _, err := PrepareEventAndSnapshot(serializer, serializer, tc.event, tc.snapshot)
+			var violation *ContractViolationError
+			require.ErrorAs(t, err, &violation)
+			require.Equal(t, tc.rule, violation.Rule)
+			require.Zero(t, serializer.serializeCalls)
+		})
+	}
+	for _, missing := range []Serializer[string]{nil, (*entrySerializer)(nil)} {
+		serializer := &entrySerializer{base: NewJSONSerializer[string]()}
+		_, _, err := PrepareEventAndSnapshot(serializer, missing, event, snapshot)
+		kind, ok := KindOf(err)
+		require.True(t, ok)
+		require.Equal(t, KindConfiguration, kind)
+		require.Zero(t, serializer.serializeCalls)
+		_, _, err = PrepareEventAndSnapshot(missing, serializer, event, snapshot)
+		kind, ok = KindOf(err)
+		require.True(t, ok)
+		require.Equal(t, KindConfiguration, kind)
+		require.Zero(t, serializer.serializeCalls)
+	}
+	serializer := NewJSONSerializer[string]()
+	preparedEvent, preparedSnapshot, err := PrepareEventAndSnapshot(serializer, serializer, event, snapshot)
+	require.NoError(t, err)
+	require.Equal(t, event.AggregateID(), preparedEvent.AggregateID())
+	require.Equal(t, event.OccurredAt(), preparedEvent.OccurredAt())
+	require.Equal(t, event.Manifest(), preparedEvent.Manifest())
+	require.Equal(t, snapshot.Manifest(), preparedSnapshot.Manifest())
+	require.Equal(t, snapshot.SeqNr(), preparedSnapshot.SeqNr())
+	require.Equal(t, []byte(`"event"`), preparedEvent.Payload())
+	require.Equal(t, []byte(`"state"`), preparedSnapshot.Aggregate())
+}
