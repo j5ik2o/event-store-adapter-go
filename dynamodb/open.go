@@ -16,6 +16,7 @@ type opened struct {
 	client   *awsdynamodb.Client
 	settings settings
 	storeID  string
+	hooks    *testhook.Hooks
 }
 
 func open(ctx context.Context, client *awsdynamodb.Client, cfg Config, hooks *testhook.Hooks, opts ...eventstore.Option) (*opened, error) {
@@ -56,5 +57,5 @@ func open(ctx context.Context, client *awsdynamodb.Client, cfg Config, hooks *te
 			}
 		}
 	}
-	return &opened{client: client, settings: validated, storeID: storeID}, nil
+	return &opened{client: client, settings: validated, storeID: storeID, hooks: hooks}, nil
 }

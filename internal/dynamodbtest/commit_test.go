@@ -150,3 +150,42 @@ func TestCommitConcurrentFaultApplication(t *testing.T) {
 	require.Equal(t, 1, injection.Faults[0].Fired())
 	require.NoError(t, finish())
 }
+
+func TestCommitPairTargetsAndCancellationPositions(t *testing.T) {
+	tables := &Tables{names: map[Table]string{"journal": "j", "snapshot": "s", "head": "h"}}
+	for _, actions := range []int{3, 4} {
+		input := commitInput()
+		for n := 0; n < actions-2; n++ {
+			input.TransactItems = append(input.TransactItems, types.TransactWriteItem{Put: &types.Put{TableName: aws.String("s"), Item: map[string]types.AttributeValue{"aid": &types.AttributeValueMemberS{Value: "Order-1"}, "skey": &types.AttributeValueMemberN{Value: []string{"0", "2"}[n]}}}})
+		}
+		for _, reverse := range []bool{false, true} {
+			if reverse {
+				for i, j := 0, len(input.TransactItems)-1; i < j; i, j = i+1, j-1 {
+					input.TransactItems[i], input.TransactItems[j] = input.TransactItems[j], input.TransactItems[i]
+				}
+			}
+			targets := tables.commitTargets(input)
+			want := []string{"journal", "head", "current-snapshot"}
+			if actions == 4 {
+				want = append(want, "history-snapshot")
+			}
+			require.ElementsMatch(t, want, targets)
+			for _, target := range targets {
+				err, buildErr := tables.commitSDKError(input, map[string]any{"code": "TransactionCanceledException", "cancellation_reasons": []any{map[string]any{"target": target, "code": "TransactionConflict"}}})
+				require.NoError(t, buildErr)
+				var canceled *types.TransactionCanceledException
+				require.ErrorAs(t, err, &canceled)
+				require.Len(t, canceled.CancellationReasons, actions)
+				for i, name := range targets {
+					code := "None"
+					if name == target {
+						code = "TransactionConflict"
+					}
+					require.Equal(t, code, aws.ToString(canceled.CancellationReasons[i].Code))
+				}
+			}
+		}
+		input.TransactItems[0].Put.Item["aid"] = &types.AttributeValueMemberS{Value: "__config__"}
+		require.Nil(t, tables.commitTargets(input))
+	}
+}

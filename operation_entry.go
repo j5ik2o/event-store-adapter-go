@@ -56,22 +56,36 @@ func (s *operationEntry[E, A]) PersistEvent(ctx context.Context, event EventEnve
 }
 
 func (s *operationEntry[E, A]) PersistEventAndSnapshot(ctx context.Context, event EventEnvelope[E], snapshot SnapshotEnvelope[A]) error {
-	if err := event.Validate(); err != nil {
+	storedEvent, storedSnapshot, err := PrepareEventAndSnapshot(s.eventSerializer, s.snapshotSerializer, event, snapshot)
+	if err != nil {
 		return err
+	}
+	return classifyStorageError(s.boundary.PersistEventAndSnapshot(ctx, storedEvent, storedSnapshot))
+}
+
+// PrepareEventAndSnapshot validates both envelopes and W-9 before serialization.
+// Each payload is copied before the next serializer can reuse its returned buffer.
+// The prepared envelopes retain the input metadata and own their bytes.
+func PrepareEventAndSnapshot[E, A any](eventSerializer Serializer[E], snapshotSerializer Serializer[A], event EventEnvelope[E], snapshot SnapshotEnvelope[A]) (EventEnvelope[[]byte], SnapshotEnvelope[[]byte], error) {
+	if err := event.Validate(); err != nil {
+		return EventEnvelope[[]byte]{}, SnapshotEnvelope[[]byte]{}, err
 	}
 	if err := snapshot.Validate(); err != nil {
-		return err
+		return EventEnvelope[[]byte]{}, SnapshotEnvelope[[]byte]{}, err
 	}
 	if event.seqNr != snapshot.seqNr {
-		return &ContractViolationError{Rule: "W-9", SeqNr: &event.seqNr, SnapshotSeqNr: &snapshot.seqNr}
+		return EventEnvelope[[]byte]{}, SnapshotEnvelope[[]byte]{}, &ContractViolationError{Rule: "W-9", SeqNr: &event.seqNr, SnapshotSeqNr: &snapshot.seqNr}
 	}
-	storedEvent, err := PrepareEvent(s.eventSerializer, event)
-	if err != nil {
-		return err
+	if nilDependency(snapshotSerializer) {
+		return EventEnvelope[[]byte]{}, SnapshotEnvelope[[]byte]{}, newConfigurationError(errors.New("snapshot serializer is nil"))
 	}
-	data, err := s.snapshotSerializer.Serialize(snapshot.aggregate)
+	storedEvent, err := PrepareEvent(eventSerializer, event)
 	if err != nil {
-		return classifySerializationError(err)
+		return EventEnvelope[[]byte]{}, SnapshotEnvelope[[]byte]{}, err
+	}
+	data, err := snapshotSerializer.Serialize(snapshot.aggregate)
+	if err != nil {
+		return EventEnvelope[[]byte]{}, SnapshotEnvelope[[]byte]{}, classifySerializationError(err)
 	}
 	data = bytes.Clone(data)
 	storedSnapshot := SnapshotEnvelope[[]byte]{
@@ -80,7 +94,7 @@ func (s *operationEntry[E, A]) PersistEventAndSnapshot(ctx context.Context, even
 		manifest:    snapshot.manifest,
 		constructed: snapshot.constructed,
 	}
-	return classifyStorageError(s.boundary.PersistEventAndSnapshot(ctx, storedEvent, storedSnapshot))
+	return storedEvent, storedSnapshot, nil
 }
 
 func (s *operationEntry[E, A]) GetLatestSnapshotByID(ctx context.Context, id AggregateID) (*SnapshotRead[A], error) {

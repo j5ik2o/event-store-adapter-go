@@ -26,9 +26,10 @@ import (
 
 type eventSDKInputKey struct{}
 type eventSDKResult struct {
-	Input  *awsdynamodb.TransactWriteItemsInput
-	Output *awsdynamodb.TransactWriteItemsOutput
-	Error  error
+	Input    *awsdynamodb.TransactWriteItemsInput
+	Output   *awsdynamodb.TransactWriteItemsOutput
+	Error    error
+	Metadata middleware.Metadata
 }
 type eventSDKResults struct {
 	mu      sync.Mutex
@@ -46,14 +47,26 @@ func (r *eventSDKResults) apiOption(stack *middleware.Stack) error {
 	}
 	return stack.Finalize.Add(middleware.FinalizeMiddlewareFunc("observe-original-event-result", func(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (middleware.FinalizeOutput, middleware.Metadata, error) {
 		out, metadata, err := next.HandleFinalize(ctx, in)
-		if input, ok := ctx.Value(eventSDKInputKey{}).(*awsdynamodb.TransactWriteItemsInput); ok && len(input.TransactItems) == 2 {
+		if input, ok := ctx.Value(eventSDKInputKey{}).(*awsdynamodb.TransactWriteItemsInput); ok && len(input.TransactItems) >= 2 && len(input.TransactItems) <= 4 && appendSDKInput(input) {
 			output, _ := out.Result.(*awsdynamodb.TransactWriteItemsOutput)
 			r.mu.Lock()
-			r.results = append(r.results, eventSDKResult{Input: input, Output: output, Error: err})
+			r.results = append(r.results, eventSDKResult{Input: input, Output: output, Error: err, Metadata: metadata})
 			r.mu.Unlock()
 		}
 		return out, metadata, err
 	}), middleware.Before)
+}
+
+func appendSDKInput(input *awsdynamodb.TransactWriteItemsInput) bool {
+	for _, action := range input.TransactItems {
+		if action.Put != nil {
+			aid, ok := action.Put.Item["aid"].(*types.AttributeValueMemberS)
+			if ok && aid.Value == "__config__" {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (r *eventSDKResults) calls() []eventSDKResult {

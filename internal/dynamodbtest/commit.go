@@ -91,10 +91,12 @@ func commitFaultSupported(spec conformance.FaultSpec) bool {
 // commitTargets names the real actions without imposing an action order.
 // Configuration opening has reserved keys and belongs to its existing middleware.
 func (t *Tables) commitTargets(input *dynamodb.TransactWriteItemsInput) []string {
-	if len(input.TransactItems) != 2 {
+	if len(input.TransactItems) < 2 || len(input.TransactItems) > 4 {
 		return nil
 	}
 	targets := make([]string, len(input.TransactItems))
+	seen := make(map[string]bool)
+	var aggregateID string
 	for i, action := range input.TransactItems {
 		var table string
 		var item map[string]types.AttributeValue
@@ -110,6 +112,11 @@ func (t *Tables) commitTargets(input *dynamodb.TransactWriteItemsInput) []string
 		if !ok || aid.Value == "__config__" {
 			return nil
 		}
+		if i == 0 {
+			aggregateID = aid.Value
+		} else if aid.Value != aggregateID {
+			return nil
+		}
 		switch table {
 		case t.names["journal"]:
 			if action.Put == nil {
@@ -118,11 +125,32 @@ func (t *Tables) commitTargets(input *dynamodb.TransactWriteItemsInput) []string
 			targets[i] = "journal"
 		case t.names["head"]:
 			targets[i] = "head"
+		case t.names["snapshot"]:
+			if action.Put == nil {
+				return nil
+			}
+			key, ok := item["skey"].(*types.AttributeValueMemberN)
+			if !ok {
+				return nil
+			}
+			n, err := strconv.ParseInt(key.Value, 10, 64)
+			if err != nil || n < 0 {
+				return nil
+			}
+			if n == 0 {
+				targets[i] = "current-snapshot"
+			} else {
+				targets[i] = "history-snapshot"
+			}
 		default:
 			return nil
 		}
+		if seen[targets[i]] {
+			return nil
+		}
+		seen[targets[i]] = true
 	}
-	if targets[0] == targets[1] {
+	if !seen["journal"] || !seen["head"] || seen["history-snapshot"] && !seen["current-snapshot"] {
 		return nil
 	}
 	return targets
@@ -135,7 +163,7 @@ func (t *Tables) commitSDKError(input *dynamodb.TransactWriteItemsInput, details
 	case "TransactionCanceledException":
 		targets := t.commitTargets(input)
 		if targets == nil {
-			return nil, fmt.Errorf("cancellation requires an event-only transaction")
+			return nil, fmt.Errorf("cancellation requires an append transaction")
 		}
 		list, ok := details["cancellation_reasons"].([]any)
 		if !ok {
