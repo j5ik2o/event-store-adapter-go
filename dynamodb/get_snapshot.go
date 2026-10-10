@@ -29,6 +29,9 @@ func (s *opened) GetLatestSnapshotByID(ctx context.Context, id eventstore.Aggreg
 	items := make(map[string]map[string]types.AttributeValue, 2)
 	delay := 50 * time.Millisecond
 	for retries := 0; ; retries++ {
+		if cause := context.Cause(ctx); cause != nil {
+			return nil, &eventstore.StorageError{Cause: cause}
+		}
 		out, err := s.client.BatchGetItem(ctx, &awsdynamodb.BatchGetItemInput{RequestItems: pending})
 		if err != nil {
 			return nil, &eventstore.StorageError{Cause: err}
@@ -57,7 +60,9 @@ func (s *opened) GetLatestSnapshotByID(ctx context.Context, id eventstore.Aggreg
 		if retries == s.settings.configurationReadRetryLimit {
 			return nil, &eventstore.StorageError{Cause: fmt.Errorf("latest snapshot read retry limit %d reached with unprocessed keys", s.settings.configurationReadRetryLimit)}
 		}
-		s.hooks.Sleep(delay)
+		if err := s.waitForSnapshotRetry(ctx, delay); err != nil {
+			return nil, &eventstore.StorageError{Cause: err}
+		}
 		delay = min(2*delay, time.Second)
 	}
 	head, exists := items[s.settings.headTableName]
@@ -77,4 +82,20 @@ func (s *opened) GetLatestSnapshotByID(ctx context.Context, id eventstore.Aggreg
 		result.Snapshot = &snapshot
 	}
 	return result, nil
+}
+
+func (s *opened) waitForSnapshotRetry(ctx context.Context, delay time.Duration) error {
+	if cause := context.Cause(ctx); cause != nil {
+		return cause
+	}
+	completed := make(chan struct{})
+	go func() {
+		s.hooks.Sleep(delay)
+		close(completed)
+	}()
+	select {
+	case <-ctx.Done():
+	case <-completed:
+	}
+	return context.Cause(ctx)
 }

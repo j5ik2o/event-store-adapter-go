@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -184,6 +185,170 @@ func TestDynamoDBSnapshotLocalUnprocessedAndFixedInputs(t *testing.T) {
 			require.Equal(t, original.Responses[cfg.SnapshotTableName][0], physical)
 			logBatchObservations(t, observer, 1)
 		})
+	}
+}
+
+func TestDynamoDBSnapshotLocalContextDuringRetryWait(t *testing.T) {
+	e := configurationEnvironment(t)
+	for _, pending := range []struct {
+		name           string
+		head, snapshot bool
+	}{
+		{"head only", true, false},
+		{"snapshot only", false, true},
+		{"both", true, true},
+	} {
+		for _, ending := range []string{"cancel", "deadline"} {
+			t.Run(pending.name+"/"+ending, func(t *testing.T) {
+				_, cfg := configurationTables(t, e, false)
+				limit := 2
+				cfg.ConfigurationReadRetryLimit = &limit
+				var deferred []string
+				if pending.head {
+					deferred = append(deferred, cfg.HeadTableName)
+				}
+				if pending.snapshot {
+					deferred = append(deferred, cfg.SnapshotTableName)
+				}
+				r := dynamodbtest.NewRecorder()
+				var sdkCalls atomic.Int32
+				observer := &dynamodbtest.ReadObserver{Match: snapshotReadMatch(cfg)}
+				observer.Before = func(context.Context, any) error {
+					sdkCalls.Add(1)
+					return nil
+				}
+				observer.After = func(_ context.Context, input, actual any) (any, error) {
+					return dynamodbtest.DeferReadKeys(input.(*awsdynamodb.BatchGetItemInput), actual.(*awsdynamodb.BatchGetItemOutput), deferred...)
+				}
+				es := &readCodec[string]{base: eventstore.NewJSONSerializer[string]()}
+				ss := &readCodec[string]{base: eventstore.NewJSONSerializer[string]()}
+				hooks := testhook.New()
+				store, err := newWithHooks(t.Context(), e.NewClient(r.APIOption, observer.APIOption), cfg, es, ss, hooks)
+				require.NoError(t, err)
+				persistReadPair(t, store, 1)
+				id := readID(t)
+
+				var ctx context.Context
+				var stop context.CancelFunc
+				var cancel context.CancelCauseFunc
+				cause := errors.New("snapshot caller canceled")
+				if ending == "cancel" {
+					ctx, cancel = context.WithCancelCause(t.Context())
+					stop = func() { cancel(cause) }
+				} else {
+					ctx, stop = context.WithTimeout(t.Context(), 2*time.Second)
+					cause = context.DeadlineExceeded
+				}
+				started := make(chan struct {
+					delay time.Duration
+					cause error
+				}, 1)
+				release := make(chan struct{})
+				sleepFinished := make(chan struct{}, 1)
+				var waits atomic.Int32
+				hooks.SetSleeper(func(delay time.Duration) {
+					waits.Add(1)
+					started <- struct {
+						delay time.Duration
+						cause error
+					}{delay, context.Cause(ctx)}
+					<-release
+					sleepFinished <- struct{}{}
+				})
+				result := make(chan struct {
+					out *eventstore.SnapshotRead[string]
+					err error
+				}, 1)
+				completed := make(chan struct{})
+				t.Cleanup(func() {
+					stop()
+					close(release)
+					select {
+					case <-completed:
+					case <-time.After(5 * time.Second):
+						t.Error("snapshot read did not finish during cleanup")
+					}
+					if waits.Load() != 0 {
+						select {
+						case <-sleepFinished:
+						case <-time.After(5 * time.Second):
+							t.Error("snapshot sleeper did not finish during cleanup")
+						}
+					}
+				})
+				go func() {
+					out, err := store.GetLatestSnapshotByID(dynamodbtest.WithOperation(ctx, 1), id)
+					result <- struct {
+						out *eventstore.SnapshotRead[string]
+						err error
+					}{out, err}
+					close(completed)
+				}()
+
+				select {
+				case wait := <-started:
+					require.Equal(t, 50*time.Millisecond, wait.delay)
+					require.NoError(t, wait.cause, "Context must be active when the retry wait starts")
+				case <-time.After(5 * time.Second):
+					t.Fatal("snapshot retry wait did not start")
+				}
+				observations := observer.Results(1)
+				require.Len(t, observations, 1)
+				require.NoError(t, observations[0].OriginalError)
+				require.NoError(t, observations[0].ReceivedError)
+				original := observations[0].Original.(*awsdynamodb.BatchGetItemOutput)
+				received := observations[0].Received.(*awsdynamodb.BatchGetItemOutput)
+				require.Len(t, original.Responses[cfg.HeadTableName], 1)
+				require.Len(t, original.Responses[cfg.SnapshotTableName], 1)
+				require.Empty(t, original.UnprocessedKeys)
+				require.Len(t, received.UnprocessedKeys, len(deferred))
+				for _, table := range deferred {
+					require.Len(t, received.UnprocessedKeys[table].Keys, 1)
+					require.NotContains(t, received.Responses, table)
+				}
+				originalID, ok := awsmiddleware.GetRequestIDMetadata(original.ResultMetadata)
+				require.True(t, ok)
+				receivedID, ok := awsmiddleware.GetRequestIDMetadata(received.ResultMetadata)
+				require.True(t, ok)
+				require.Equal(t, originalID, receivedID)
+				require.NoError(t, ctx.Err())
+
+				if ending == "cancel" {
+					cancel(cause)
+				} else {
+					select {
+					case <-ctx.Done():
+					case <-time.After(5 * time.Second):
+						t.Fatal("snapshot Context deadline did not expire")
+					}
+				}
+				select {
+				case got := <-result:
+					require.Nil(t, got.out)
+					requireKind(t, got.err, eventstore.KindStorage)
+					var storage *eventstore.StorageError
+					require.ErrorAs(t, got.err, &storage)
+					require.ErrorIs(t, got.err, cause)
+					require.Equal(t, cause, errors.Unwrap(storage))
+				case <-time.After(5 * time.Second):
+					t.Fatal("snapshot read did not return while the sleeper was blocked")
+				}
+				require.Equal(t, cause, context.Cause(ctx))
+				require.Equal(t, int32(1), sdkCalls.Load())
+				require.Len(t, r.Requests(1), 1)
+				require.Len(t, observer.Results(1), 1)
+				require.Equal(t, int32(1), waits.Load())
+				require.Zero(t, es.deserializeCalls)
+				require.Zero(t, ss.deserializeCalls)
+				select {
+				case <-sleepFinished:
+					t.Fatal("snapshot sleeper finished before it was released")
+				default:
+				}
+				logBatchObservations(t, observer, 1)
+				t.Logf("initial real SDK response -> active retry wait -> %s -> nil result, Storage, cause=%v; subsequent SDK calls=0, subsequent requests=0, both Deserialize=0; sleeper still blocked", ending, context.Cause(ctx))
+			})
+		}
 	}
 }
 

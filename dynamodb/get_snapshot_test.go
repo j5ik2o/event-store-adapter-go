@@ -1,7 +1,9 @@
 package dynamodb
 
 import (
+	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -140,6 +142,58 @@ func TestDynamoDBSnapshotUnitStorageFailures(t *testing.T) {
 				require.ErrorIs(t, err, tc.cause)
 				require.NotNil(t, errors.Unwrap(err))
 			}
+		})
+	}
+}
+
+func TestDynamoDBSnapshotUnitContextCancellation(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		calls, waits int
+	}{
+		{"before first request", 0, 0},
+		{"before retry wait", 1, 0},
+		{"at wait completion", 1, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cause := errors.New("snapshot caller canceled")
+			ctx, cancel := context.WithCancelCause(t.Context())
+			defer cancel(cause)
+			r := dynamodbtest.NewRecorder()
+			hooks := testhook.New()
+			var waits atomic.Int32
+			hooks.SetSleeper(func(time.Duration) {
+				waits.Add(1)
+				cancel(cause)
+			})
+			calls := 0
+			store := readUnitStore(t, r, 2, hooks, func(input any) (any, error) {
+				calls++
+				batch := input.(*awsdynamodb.BatchGetItemInput)
+				if tc.name == "before retry wait" {
+					cancel(cause)
+				}
+				return &awsdynamodb.BatchGetItemOutput{
+					Responses:       map[string][]map[string]types.AttributeValue{"head": {readHeadFixture("1")}},
+					UnprocessedKeys: map[string]types.KeysAndAttributes{"snapshot": batch.RequestItems["snapshot"]},
+				}, nil
+			})
+			if tc.name == "before first request" {
+				cancel(cause)
+			}
+
+			out, err := store.GetLatestSnapshotByID(dynamodbtest.WithOperation(ctx, 1), readID(t))
+
+			require.Nil(t, out)
+			requireKind(t, err, eventstore.KindStorage)
+			var storage *eventstore.StorageError
+			require.ErrorAs(t, err, &storage)
+			require.ErrorIs(t, err, cause)
+			require.Equal(t, cause, errors.Unwrap(storage))
+			require.ErrorIs(t, ctx.Err(), context.Canceled)
+			require.Equal(t, tc.calls, calls)
+			require.Len(t, r.Requests(1), tc.calls)
+			require.Equal(t, int32(tc.waits), waits.Load())
 		})
 	}
 }
