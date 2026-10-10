@@ -3,6 +3,7 @@
 // It loads and validates the data, verifies manifest.json, classifies every case,
 // evaluates required.json and writes conformance-report.json. It runs scenarios
 // through the Backend and Store boundary (backend.go) and injects faults through internal/testhook.
-// ID and sequence-number value cases execute against the eventstore core. No storage
-// backend is connected yet; storage scenarios and time roundtrips remain unverified.
+// ID and sequence-number values use the eventstore core. RunBackend connects
+// storage scenarios, time roundtrips and layout checks to real public adapters
+// in the external test package, retaining actual operation and fault records.
 package conformance

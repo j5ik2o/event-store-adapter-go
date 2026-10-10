@@ -17,13 +17,12 @@ type ScenarioPlan struct {
 	Requires []string
 	// ClockStart is the clock of the scenario (clock.epoch_seconds), if any.
 	ClockStart *int64
-	// UnwiredObservation names the first observation that the runner cannot check yet, or is empty.
-	UnwiredObservation string
 }
 
 // InitPlan is the initialization block. Error is nil when a success is expected.
 type InitPlan struct {
-	Error *ErrorExpect
+	Error   *ErrorExpect
+	Observe map[string]any
 }
 
 // ErrorExpect is an expected error.
@@ -70,8 +69,6 @@ type snapshotFixture struct {
 	Aggregate any
 	Manifest  string
 }
-
-var unwiredObservations = []string{"items", "requests", "no_requests_in_phases", "request_count", "minimum_request_count"}
 
 // parseScenario reads a materialized scenario. Schema validation has already run, so a
 // missing or mistyped element, or a reference to an unknown fixture or step, is a data error.
@@ -145,15 +142,7 @@ func parseScenario(m map[string]any) (*ScenarioPlan, error) {
 			}
 		}
 		if obs, ok := im["observe"].(map[string]any); ok {
-			p.noteObservation(obs)
-			if p.UnwiredObservation == "" {
-				for _, key := range []string{"history", "notifications"} {
-					if _, present := obs[key]; present {
-						p.UnwiredObservation = "initialization.observe." + key
-						break
-					}
-				}
-			}
+			p.Init.Observe = obs
 		}
 	}
 
@@ -166,7 +155,6 @@ func parseScenario(m map[string]any) (*ScenarioPlan, error) {
 		if err != nil {
 			return nil, fmt.Errorf("steps[%d]: %w", i, err)
 		}
-		p.noteObservation(sp.Observe)
 		p.Steps = append(p.Steps, sp)
 	}
 
@@ -189,16 +177,22 @@ func parseScenario(m map[string]any) (*ScenarioPlan, error) {
 	return p, nil
 }
 
-func (p *ScenarioPlan) noteObservation(obs map[string]any) {
-	if p.UnwiredObservation != "" {
-		return
+// EventFixture returns an input fixture for a declared interleaved operation.
+func (p *ScenarioPlan) EventFixture(name string) (Event, error) {
+	f, ok := p.Events[name]
+	if !ok {
+		return Event{}, fmt.Errorf("unknown event fixture %q", name)
 	}
-	for _, k := range unwiredObservations {
-		if _, present := obs[k]; present {
-			p.UnwiredObservation = k
-			return
-		}
+	return toEvent(f)
+}
+
+// SnapshotFixture returns an input fixture for a declared interleaved operation.
+func (p *ScenarioPlan) SnapshotFixture(name string) (Snapshot, error) {
+	f, ok := p.Snaps[name]
+	if !ok {
+		return Snapshot{}, fmt.Errorf("unknown snapshot fixture %q", name)
 	}
+	return toSnapshot(f)
 }
 
 func parseStoreConfig(m map[string]any) (StoreConfig, error) {

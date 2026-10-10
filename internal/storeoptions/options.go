@@ -5,6 +5,8 @@ package storeoptions
 import (
 	"context"
 	"fmt"
+
+	"github.com/j5ik2o/event-store-adapter-go/v2/internal/testhook"
 )
 
 // RetentionMode is the internal representation shared with eventstore.
@@ -22,6 +24,8 @@ type Options struct {
 	RetentionMode           RetentionMode
 	TTLGraceSeconds         int64
 	RetentionFailureHandler func(context.Context, error)
+	// Hooks is internal test instrumentation, unavailable to external modules.
+	Hooks *testhook.Hooks
 }
 
 // Apply assembles a fresh configuration, applying options in order.

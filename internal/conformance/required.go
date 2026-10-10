@@ -64,6 +64,9 @@ func EvaluateRequired(req RequiredList, results []CaseResult) (GateResult, error
 	byKey := make(map[key]CaseResult, len(results))
 	knownID := make(map[string]bool, len(results))
 	for _, r := range results {
+		if _, duplicate := byKey[key{r.ID, r.Backend}]; duplicate {
+			return GateResult{}, fmt.Errorf("duplicate result %s/%s", r.ID, r.Backend)
+		}
 		byKey[key{r.ID, r.Backend}] = r
 		knownID[r.ID] = true
 	}

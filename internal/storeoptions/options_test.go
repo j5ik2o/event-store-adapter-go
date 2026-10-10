@@ -7,6 +7,7 @@ import (
 
 	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
 	"github.com/j5ik2o/event-store-adapter-go/v2/internal/storeoptions"
+	"github.com/j5ik2o/event-store-adapter-go/v2/internal/testhook"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -58,6 +59,19 @@ func TestApplyBuildsFreshSettings(t *testing.T) {
 	assert.Equal(t, 3, *first.RetentionCount)
 	assert.Equal(t, storeoptions.RetentionTTL, first.RetentionMode)
 	assert.Equal(t, int64(9), first.TTLGraceSeconds)
+}
+
+func TestApplyKeepsHooksScopedToOneConstruction(t *testing.T) {
+	hooks := testhook.New()
+	first, err := storeoptions.Apply(configurationError, eventstore.Option(func(o *storeoptions.Options) error {
+		o.Hooks = hooks
+		return nil
+	}))
+	require.NoError(t, err)
+	require.Same(t, hooks, first.Hooks)
+	second, err := storeoptions.Apply[eventstore.Option](configurationError)
+	require.NoError(t, err)
+	require.Nil(t, second.Hooks)
 }
 
 func TestApplyRejectsInvalidCommonSettings(t *testing.T) {

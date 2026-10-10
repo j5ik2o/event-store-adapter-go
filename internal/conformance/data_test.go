@@ -14,7 +14,7 @@ func TestLoadData(t *testing.T) {
 	t.Run("reads the real data: 116 cases, 30 value cases", func(t *testing.T) {
 		d, err := LoadData(dataRoot())
 		require.NoError(t, err)
-		assert.Equal(t, 116, distinctIDs(classifyCases(d)))
+		assert.Equal(t, 116, len(d.Values)+len(d.Scenarios)+len(d.Layouts))
 		assert.Len(t, d.Values, 30)
 	})
 
@@ -96,7 +96,7 @@ func TestLoadData_DuplicateID(t *testing.T) {
 	t.Run("real data has unique ids", func(t *testing.T) {
 		d, err := LoadData(dataRoot())
 		require.NoError(t, err)
-		assert.Equal(t, 116, distinctIDs(classifyCases(d)))
+		assert.Equal(t, 116, len(d.Values)+len(d.Scenarios)+len(d.Layouts))
 	})
 
 	t.Run("duplicate id across files is rejected and named", func(t *testing.T) {
@@ -106,14 +106,6 @@ func TestLoadData_DuplicateID(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "seq-zero-value")
 	})
-}
-
-func distinctIDs(rs []CaseResult) int {
-	seen := map[string]bool{}
-	for _, r := range rs {
-		seen[r.ID] = true
-	}
-	return len(seen)
 }
 
 func TestLoadData_SchemaValidation(t *testing.T) {

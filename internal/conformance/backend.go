@@ -8,7 +8,7 @@ import (
 )
 
 // Backend is the boundary between the runner and a storage backend. It creates stores for
-// scenarios. Nothing in this package implements it: the runner is not connected to a backend yet.
+// scenarios. Actual adapters live in the external test package.
 type Backend interface {
 	// Name is "memory" or "dynamodb".
 	Name() string
@@ -20,6 +20,26 @@ type Backend interface {
 	Seed(ctx context.Context, items []map[string]any) error
 	// Open creates a store for one scenario. The returned error may be an *OperationError.
 	Open(ctx context.Context, cfg StoreConfig, inj Injection) (Store, error)
+}
+
+// ScenarioOwner provisions an isolated destination before Seed or Open.
+// Cleanup belongs to the scenario even when public construction fails.
+type ScenarioOwner interface {
+	Prepare(context.Context, *ScenarioPlan) (Backend, func() error, error)
+}
+
+// ObservationReader collects actual observations after an operation, including
+// construction failures. Expected item values are used only to select read keys.
+type ObservationReader interface {
+	Observe(context.Context, int, StepPlan) (map[string]any, error)
+}
+
+type operationContextKey struct{}
+
+// OperationNumber identifies construction (0) or a one-based scenario operation.
+func OperationNumber(ctx context.Context) int {
+	n, _ := ctx.Value(operationContextKey{}).(int)
+	return n
 }
 
 // Store is an opened store. Each method maps to one operation of a step.
@@ -51,6 +71,8 @@ type Injection struct {
 	Faults []*Fault
 	// Hooks carries the clock, the waits and the faults that go through testhook.
 	Hooks *testhook.Hooks
+	// Plan supplies input fixtures for declared interleaved writes, never expectations.
+	Plan *ScenarioPlan
 }
 
 // AggregateIDArg is the aggregate ID given by type name and value.

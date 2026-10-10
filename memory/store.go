@@ -68,7 +68,20 @@ func NewStore(opts ...eventstore.Option) (*Store, error) {
 		count := *settings.RetentionCount
 		settings.RetentionCount = &count
 	}
-	return &Store{records: make(map[string]*record), settings: settings}, nil
+	store := &Store{records: make(map[string]*record), settings: settings, hooks: settings.Hooks}
+	if store.hooks != nil {
+		store.hooks.ProvideHistory(func(aid string) (testhook.History, error) {
+			_, copied := store.observeState(aid)
+			history := testhook.History{Active: []int64{}, Marked: []int64{}}
+			if copied != nil {
+				for _, snapshot := range copied.history {
+					history.Active = append(history.Active, int64(snapshot.seqNr))
+				}
+			}
+			return history, nil
+		})
+	}
+	return store, nil
 }
 
 // observe copies the actual head and journal under the same read lock.

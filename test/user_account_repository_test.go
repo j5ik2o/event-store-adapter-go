@@ -3,174 +3,129 @@ package test
 import (
 	"context"
 	"fmt"
-	"github.com/j5ik2o/event-store-adapter-go/v2/pkg"
-	"github.com/j5ik2o/event-store-adapter-go/v2/pkg/common"
 	"testing"
+	"time"
 
-	"github.com/stretchr/testify/assert"
+	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
+	"github.com/j5ik2o/event-store-adapter-go/v2/dynamodb"
+	"github.com/j5ik2o/event-store-adapter-go/v2/internal/dynamodbtest"
+	"github.com/j5ik2o/event-store-adapter-go/v2/memory"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/localstack"
 )
 
 type userAccountRepository struct {
-	eventStore pkg.EventStore
+	eventStore eventstore.EventStore[userAccountEvent, userAccount]
 }
 
-func newUserAccountRepository(eventStore pkg.EventStore) *userAccountRepository {
-	return &userAccountRepository{
-		eventStore: eventStore,
+func newUserAccountRepository(store eventstore.EventStore[userAccountEvent, userAccount]) *userAccountRepository {
+	return &userAccountRepository{eventStore: store}
+}
+func (r *userAccountRepository) storeEvent(ctx context.Context, id userAccountID, seqNr eventstore.SeqNr, payload userAccountEvent) error {
+	event, err := eventstore.NewEventEnvelope(id, seqNr, time.Now(), payload, eventstore.WithManifest("user-account-event/v1"))
+	if err != nil {
+		return err
 	}
+	return r.eventStore.PersistEvent(ctx, event)
 }
-
-func (r *userAccountRepository) storeEvent(event pkg.Event, version uint64) error {
-	return r.eventStore.PersistEvent(event, version)
+func (r *userAccountRepository) storeEventAndSnapshot(ctx context.Context, event userAccountEvent, account *userAccount) error {
+	envelope, err := eventstore.NewEventEnvelope(account.ID, account.seqNr, time.Now(), event, eventstore.WithManifest("user-account-event/v1"))
+	if err != nil {
+		return err
+	}
+	snapshot, err := eventstore.NewSnapshotEnvelope(*account, account.seqNr, eventstore.WithManifest("user-account-state/v1"))
+	if err != nil {
+		return err
+	}
+	return r.eventStore.PersistEventAndSnapshot(ctx, envelope, snapshot)
 }
-
-func (r *userAccountRepository) storeEventAndSnapshot(event pkg.Event, aggregate pkg.Aggregate) error {
-	return r.eventStore.PersistEventAndSnapshot(event, aggregate)
-}
-
-func (r *userAccountRepository) findById(id pkg.AggregateId) (*userAccount, error) {
-	result, err := r.eventStore.GetLatestSnapshotById(id)
+func (r *userAccountRepository) findByID(ctx context.Context, id userAccountID) (*userAccount, error) {
+	read, err := r.eventStore.GetLatestSnapshotByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if result.Empty() {
-		return nil, fmt.Errorf("not found")
-	} else {
-		events, err := r.eventStore.GetEventsByIdSinceSeqNr(id, result.Aggregate().GetSeqNr()+1)
-		if err != nil {
-			return nil, err
-		}
-		return replayUserAccount(events, result.Aggregate().(*userAccount)), nil
+	if read == nil {
+		return nil, fmt.Errorf("user account %s not found", id)
 	}
+	since := eventstore.SeqNr(1)
+	var state *userAccount
+	if read.Snapshot != nil {
+		restored := read.Snapshot.Aggregate()
+		restored.seqNr = read.Snapshot.SeqNr()
+		state = &restored
+		since = read.Snapshot.SeqNr() + 1
+	}
+	events, err := r.eventStore.GetEventsByIDSinceSeqNr(ctx, id, since)
+	if err != nil {
+		return nil, err
+	}
+	return replayUserAccount(id, events, state)
 }
 
-func Test_Repository_DynamoDB_StoreAndFindById(t *testing.T) {
-	ctx := context.Background()
-	container, err := localstack.RunContainer(
-		ctx,
-		testcontainers.CustomizeRequest(testcontainers.GenericContainerRequest{
-			ContainerRequest: testcontainers.ContainerRequest{
-				Image: "localstack/localstack:2.1.0",
-				Env: map[string]string{
-					"SERVICES":              "dynamodb",
-					"DEFAULT_REGION":        "us-east-1",
-					"EAGER_SERVICE_LOADING": "1",
-					"DYNAMODB_SHARED_DB":    "1",
-					"DYNAMODB_IN_MEMORY":    "1",
-				},
-			},
-		}),
-	)
-	require.Nil(t, err)
-	assert.NotNil(t, container)
-	dynamodbClient, err := common.CreateDynamoDBClient(t, ctx, container)
-	require.Nil(t, err)
-	assert.NotNil(t, dynamodbClient)
-	err = common.CreateJournalTable(t, ctx, dynamodbClient, "journal", "journal-aid-index")
-	require.Nil(t, err)
-	err = common.CreateSnapshotTable(t, ctx, dynamodbClient, "snapshot", "snapshot-aid-index")
-	require.Nil(t, err)
+func TestUserAccountRepository(t *testing.T) {
+	for _, backend := range []string{"memory", "dynamodb"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := t.Context()
+			keep, err := eventstore.KeepLatest(1)
+			require.NoError(t, err)
+			options := []eventstore.Option{eventstore.WithRetentionCount(keep)}
+			var store eventstore.EventStore[userAccountEvent, userAccount]
+			if backend == "memory" {
+				state, err := memory.NewStore(options...)
+				require.NoError(t, err)
+				store, err = memory.New(state, eventstore.NewJSONSerializer[userAccountEvent](), eventstore.NewJSONSerializer[userAccount]())
+				require.NoError(t, err)
+			} else {
+				environment, err := dynamodbtest.Start(ctx)
+				require.NoError(t, err)
+				t.Cleanup(func() {
+					cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+					require.NoError(t, environment.Close(cleanup))
+				})
+				tables, err := environment.CreateTables(ctx, false)
+				require.NoError(t, err)
+				t.Cleanup(func() {
+					cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+					require.NoError(t, tables.Close(cleanup))
+				})
+				journal, _ := tables.TableName("journal")
+				snapshot, _ := tables.TableName("snapshot")
+				head, _ := tables.TableName("head")
+				store, err = dynamodb.New(ctx, environment.NewClient(), dynamodb.Config{JournalTableName: journal, SnapshotTableName: snapshot, HeadTableName: head, SnapshotHistoryIndexName: tables.HistoryIndexName()}, eventstore.NewJSONSerializer[userAccountEvent](), eventstore.NewJSONSerializer[userAccount](), options...)
+				require.NoError(t, err)
+			}
+			repository := newUserAccountRepository(store)
+			initial, created := newUserAccount(userAccountID("with-snapshot"), "first")
+			require.NoError(t, repository.storeEventAndSnapshot(ctx, created, initial))
+			renamed, changed := initial.Rename("second")
+			require.NoError(t, repository.storeEvent(ctx, renamed.ID, renamed.seqNr, changed))
+			latest, err := store.GetLatestSnapshotByID(ctx, initial.ID)
+			require.NoError(t, err)
+			require.Equal(t, eventstore.SeqNr(2), latest.HeadSeqNr)
+			require.Equal(t, eventstore.SeqNr(1), latest.Snapshot.SeqNr())
+			restored, err := repository.findByID(ctx, initial.ID)
+			require.NoError(t, err)
+			require.Equal(t, renamed, restored, "event 2 must be replayed after snapshot 1, despite head 2")
+			third, changedAgain := restored.Rename("third")
+			require.NoError(t, repository.storeEventAndSnapshot(ctx, changedAgain, third))
+			restored, err = repository.findByID(ctx, third.ID)
+			require.NoError(t, err)
+			require.Equal(t, third, restored)
 
-	eventConverter := func(m map[string]interface{}) (pkg.Event, error) {
-		aggregateMap, ok := m["AggregateId"].(map[string]interface{})
-		if !ok {
-			return nil, fmt.Errorf("AggregateId is not a map")
-		}
-		aggregateId, ok := aggregateMap["Value"].(string)
-		if !ok {
-			return nil, fmt.Errorf("Value is not a float64")
-		}
-		switch m["TypeName"].(string) {
-		case "UserAccountCreated":
-			userAccountId := newUserAccountId(aggregateId)
-			return newUserAccountCreated(
-				m["Id"].(string),
-				&userAccountId,
-				uint64(m["SeqNr"].(float64)),
-				m["Name"].(string),
-				uint64(m["OccurredAt"].(float64)),
-			), nil
-		case "UserAccountNameChanged":
-			userAccountId := newUserAccountId(aggregateId)
-			return newUserAccountNameChanged(
-				m["Id"].(string),
-				&userAccountId,
-				uint64(m["SeqNr"].(float64)),
-				m["Name"].(string),
-				uint64(m["OccurredAt"].(float64)),
-			), nil
-		default:
-			return nil, fmt.Errorf("unknown event type")
-		}
+			initial, created = newUserAccount(userAccountID("without-snapshot"), "first")
+			require.NoError(t, repository.storeEvent(ctx, initial.ID, initial.seqNr, created))
+			renamed, changed = initial.Rename("second")
+			require.NoError(t, repository.storeEvent(ctx, renamed.ID, renamed.seqNr, changed))
+			latest, err = store.GetLatestSnapshotByID(ctx, initial.ID)
+			require.NoError(t, err)
+			require.Nil(t, latest.Snapshot)
+			require.Equal(t, eventstore.SeqNr(2), latest.HeadSeqNr)
+			restored, err = repository.findByID(ctx, initial.ID)
+			require.NoError(t, err)
+			require.Equal(t, renamed, restored, "a missing snapshot requires replay from event 1")
+			_, err = repository.findByID(ctx, userAccountID("missing"))
+			require.ErrorContains(t, err, "not found")
+		})
 	}
-	aggregateConverter := func(m map[string]interface{}) (pkg.Aggregate, error) {
-		idMap, ok := m["Id"].(map[string]interface{})
-		if !ok {
-			return nil, fmt.Errorf("Id is not a map")
-		}
-		value, ok := idMap["Value"].(string)
-		if !ok {
-			return nil, fmt.Errorf("Value is not a float64")
-		}
-		userAccountId := newUserAccountId(value)
-		result, _ := newUserAccount(userAccountId, m["Name"].(string))
-		return result, nil
-	}
-
-	eventStore, err := pkg.NewEventStoreOnDynamoDB(
-		dynamodbClient,
-		"journal",
-		"snapshot",
-		"journal-aid-index",
-		"snapshot-aid-index",
-		1,
-		eventConverter,
-		aggregateConverter)
-	require.Nil(t, err)
-
-	repository := newUserAccountRepository(eventStore)
-	initial, userAccountCreated := newUserAccount(newUserAccountId("1"), "test")
-	err = repository.storeEventAndSnapshot(userAccountCreated, initial)
-	require.Nil(t, err)
-	actual, err := repository.findById(&initial.Id)
-	require.Nil(t, err)
-
-	assert.Equal(t, initial, actual)
-
-	result, err := actual.Rename("test2")
-	require.Nil(t, err)
-	result.Aggregate.Version = actual.Version
-
-	err = repository.storeEventAndSnapshot(result.Event, result.Aggregate)
-	require.Nil(t, err)
-	actual2, err := repository.findById(&initial.Id)
-	require.Nil(t, err)
-	assert.Equal(t, "test2", actual2.Name)
-
-}
-
-func Test_Repository_OnMemory_StoreAndFindById(t *testing.T) {
-	eventStore := pkg.NewEventStoreOnMemory()
-	repository := newUserAccountRepository(eventStore)
-	initial, userAccountCreated := newUserAccount(newUserAccountId("1"), "test")
-
-	err := repository.storeEventAndSnapshot(userAccountCreated, initial)
-	require.Nil(t, err)
-	actual, err := repository.findById(&initial.Id)
-	require.Nil(t, err)
-
-	assert.Equal(t, initial, actual)
-
-	result, err := actual.Rename("test2")
-	require.Nil(t, err)
-
-	err = repository.storeEventAndSnapshot(result.Event, result.Aggregate)
-	require.Nil(t, err)
-	actual2, err := repository.findById(&initial.Id)
-	require.Nil(t, err)
-	assert.Equal(t, "test2", actual2.Name)
-
 }

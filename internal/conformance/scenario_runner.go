@@ -17,27 +17,14 @@ import (
 
 const (
 	reasonNoBackend     = "保存先の境界が未接続のため、場面を実行していない（設計 7.2 の4番以降）"
-	reasonUnwired       = "観測を検査する手段がまだなく、場面を検証できない"
 	reasonNotInjectable = "保存先が差し込めない障害を持つため、場面を検証できない（設計 5.4）"
 	reasonMemoryTTL     = "TTL 方式を要求する場面は DynamoDB だけで、メモリでは対象外（設計 5.2 の1）"
 )
 
-// runScenarioCases runs every scenario on every backend it lists. backends maps a backend name
-// to its boundary; a name that is missing means the backend is not connected.
-func runScenarioCases(ctx context.Context, cases []ScenarioCase, backends map[string]Backend) []CaseResult {
-	var out []CaseResult
-	for _, c := range cases {
-		for _, name := range c.Backends {
-			out = append(out, runScenario(ctx, c, name, backends[name]))
-		}
-	}
-	return out
-}
-
 // runScenario runs one scenario on one backend following design 5.2. The first decision wins:
 // not-applicable, unverified, the first step that does not match, then the firing counts.
-func runScenario(ctx context.Context, c ScenarioCase, backend string, b Backend) CaseResult {
-	res := CaseResult{ID: c.ID, Rules: nonNil(c.Rules), Backend: backend}
+func runScenario(ctx context.Context, c ScenarioCase, backend string, b Backend) (res CaseResult) {
+	res = CaseResult{ID: c.ID, Rules: nonNil(c.Rules), Backend: backend}
 	set := func(s Status, reason string) CaseResult { res.Status, res.Reason = s, reason; return res }
 
 	plan := c.Plan
@@ -48,17 +35,33 @@ func runScenario(ctx context.Context, c ScenarioCase, backend string, b Backend)
 		return set(StatusNotApplicable, reasonMemoryTTL)
 	case b == nil:
 		return set(StatusUnverified, reasonNoBackend)
-	case plan.UnwiredObservation != "":
-		return set(StatusUnverified, reasonUnwired+": "+plan.UnwiredObservation)
 	}
 	for _, f := range plan.Faults {
 		if !b.Injectable(f) {
 			return set(StatusUnverified, fmt.Sprintf("%s: operation %d, phase %s, kind %s", reasonNotInjectable, f.Operation, f.Phase, f.Kind))
 		}
 	}
+	if owner, ok := b.(ScenarioOwner); ok {
+		prepared, cleanup, err := owner.Prepare(ctx, plan)
+		if err != nil {
+			return set(StatusFailure, "prepare: "+err.Error())
+		}
+		defer func() {
+			if err := cleanup(); err != nil {
+				res.Status, res.Reason = StatusFailure, "cleanup: "+err.Error()
+			}
+		}()
+		b = prepared
+	}
 
 	cursor := &operationCursor{}
 	faults := newFaults(plan.Faults, cursor)
+	defer func() {
+		cursor.Set(-1)
+		for i, f := range faults {
+			res.Faults = append(res.Faults, FaultResult{Declaration: i, Spec: f.Spec, Applied: f.Fired(), Unfired: f.Fired() == 0})
+		}
+	}()
 	hooks := testhook.New()
 	hooks.SetSleeper(func(time.Duration) {})
 	var clock atomic.Int64
@@ -82,7 +85,16 @@ func runScenario(ctx context.Context, c ScenarioCase, backend string, b Backend)
 			return time.Unix(clock.Load(), 0).UTC()
 		})
 	}
-	registerHookFaults(hooks, faults)
+	hookFaults := faults
+	if backend == "dynamodb" {
+		hookFaults = nil
+		for _, f := range faults {
+			if strings.HasPrefix(f.Spec.Phase, "serialize-") || strings.HasPrefix(f.Spec.Phase, "deserialize-") {
+				hookFaults = append(hookFaults, f)
+			}
+		}
+	}
+	registerHookFaults(hooks, hookFaults)
 
 	fail := func(step int, reason string, expected, actual any) CaseResult {
 		res.Status, res.Reason, res.Expected, res.Actual = StatusFailure, reason, expected, actual
@@ -95,9 +107,17 @@ func runScenario(ctx context.Context, c ScenarioCase, backend string, b Backend)
 			return fail(0, "seed に失敗した: "+err.Error(), nil, err.Error())
 		}
 	}
-	store, openErr := b.Open(ctx, plan.Store, Injection{Faults: faults, Hooks: hooks})
+	store, openErr := b.Open(context.WithValue(ctx, operationContextKey{}, 0), plan.Store, Injection{Faults: faults, Hooks: hooks, Plan: plan})
 	if store != nil {
 		defer store.Close()
+	}
+	var initObservation map[string]any
+	if plan.Init != nil {
+		initObservation = plan.Init.Observe
+	}
+	res.Operations = append(res.Operations, OperationResult{Number: 0, Result: errorText(openErr)})
+	if msg := compareObservation(ctx, 0, StepPlan{Observe: initObservation}, hooks, store, b, &res); msg != "" {
+		return fail(0, msg, initObservation, res.Operations[len(res.Operations)-1].Observation)
 	}
 	if plan.Init != nil && plan.Init.Error != nil {
 		if msg := matchError(plan.Init.Error, openErr); msg != "" {
@@ -119,12 +139,14 @@ func runScenario(ctx context.Context, c ScenarioCase, backend string, b Backend)
 			clock.Store(*s.ClockEpochSeconds)
 			clockSet.Store(true)
 		}
-		out := execStep(ctx, store, plan, s)
+		out := execStep(context.WithValue(ctx, operationContextKey{}, n), store, plan, s)
+		res.Operations = append(res.Operations, OperationResult{Number: n, Result: out.describe()})
+		observationError := compareObservation(ctx, n, s, hooks, store, b, &res)
 		if msg := checkExpectation(plan, s, out); msg != "" {
 			return fail(n, msg, s.Expect, out.describe())
 		}
-		if msg := checkObservation(s, hooks, store); msg != "" {
-			return fail(n, msg, s.Observe, nil)
+		if observationError != "" {
+			return fail(n, observationError, s.Observe, res.Operations[len(res.Operations)-1].Observation)
 		}
 	}
 	return finish(res, faults)
@@ -172,13 +194,9 @@ func (o stepOutcome) describe() any {
 	}
 	switch o.op {
 	case "getLatestSnapshotById":
-		return fmt.Sprintf("found=%v head_seq_nr=%d", o.snap.Found, o.snap.HeadSeqNr)
+		return o.snap
 	case "getEventsByIdSinceSeqNr":
-		seqs := make([]int64, len(o.events))
-		for i, e := range o.events {
-			seqs[i] = e.SeqNr
-		}
-		return fmt.Sprintf("events seq_nr=%v", seqs)
+		return o.events
 	}
 	return "success"
 }

@@ -15,8 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakeBackend stands in for a storage backend. It lives in tests only; the boundary
-// (Backend and Store) has no production implementation in this change.
+// fakeBackend exercises runner decisions separately from the real public stores.
 type fakeBackend struct {
 	name       string
 	injectable bool
@@ -514,7 +513,7 @@ func TestRunScenario_Clock(t *testing.T) {
 	})
 }
 
-func TestRunScenario_UnwiredObservation(t *testing.T) {
+func TestRunScenario_ObservationConnection(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
 		key, observation string
@@ -522,27 +521,48 @@ func TestRunScenario_UnwiredObservation(t *testing.T) {
 		{"history", `{"history":{"active":[1],"marked":[],"absent":[]}}`},
 		{"notifications", `{"notifications":["retention-failure"]}`},
 	} {
-		t.Run("an unwired initialization "+tc.key+" observation leaves the scenario unverified", func(t *testing.T) {
+		t.Run("initialization "+tc.key+" observations are checked after opening", func(t *testing.T) {
 			init := `{"expect":{"result":"success"},"observe":` + tc.observation + `}`
 			b := &fakeBackend{name: "memory", injectable: true}
 			r := runScenario(ctx, mkCase(t, scenarioBody(init, "")), "memory", b)
-			assert.Equal(t, StatusUnverified, r.Status)
-			assert.Contains(t, r.Reason, "initialization.observe."+tc.key)
-			assert.Equal(t, int32(0), b.opens)
+			assert.Equal(t, StatusFailure, r.Status)
+			assert.Contains(t, r.Reason, tc.key)
+			assert.Equal(t, int32(1), b.opens)
 		})
 	}
 
 	for _, key := range []string{"items", "requests", "no_requests_in_phases", "request_count", "minimum_request_count"} {
-		t.Run("an unwired "+key+" observation leaves the scenario unverified and the store unopened", func(t *testing.T) {
+		t.Run("a missing "+key+" observation reader fails after the actual operation", func(t *testing.T) {
 			s := stepObserve("persistEvent", `{"event":"e1"}`, `{"result":"success"}`,
 				`{"`+key+`":[]}`)
 			b := &fakeBackend{name: "memory", injectable: true}
 			r := runScenario(ctx, mkCase(t, scenarioBody("", "", s)), "memory", b)
-			assert.Equal(t, StatusUnverified, r.Status)
-			assert.NotEmpty(t, r.Reason)
-			assert.Equal(t, int32(0), b.opens)
+			assert.Equal(t, StatusFailure, r.Status)
+			assert.Contains(t, r.Reason, "observation reader is not connected")
+			assert.Equal(t, int32(1), b.opens)
+			assert.Equal(t, []string{"persistEvent"}, b.calls)
 		})
 	}
+}
+
+func TestRunScenarioOpenFailureIndependentObservations(t *testing.T) {
+	for _, observation := range []string{`{}`, `{"history":{"active":[],"marked":[],"absent":[]}}`} {
+		t.Run("fallback "+observation, func(t *testing.T) {
+			b := &fakeBackend{name: "memory", openErr: &OperationError{Category: "configuration", Message: "open failed"}}
+			init := `{"expect":{"error":{"category":"configuration"}},"observe":` + observation + `}`
+			result := runScenario(t.Context(), mkCase(t, scenarioBody(init, "")), "memory", b)
+			require.Equal(t, StatusSuccess, result.Status, result.Reason)
+			require.Equal(t, "configuration: open failed", result.Operations[0].Result)
+		})
+	}
+	t.Run("connected reader", func(t *testing.T) {
+		b := &observedBackend{fakeBackend: &fakeBackend{name: "memory", openErr: &OperationError{Category: "configuration", Message: "open failed"}}, actual: map[string]any{"notifications": []any{}}}
+		init := `{"expect":{"error":{"category":"configuration"}},"observe":{"notifications":[]}}`
+		result := runScenario(t.Context(), mkCase(t, scenarioBody(init, "")), "memory", b)
+		require.Equal(t, StatusSuccess, result.Status, result.Reason)
+		require.Equal(t, "configuration: open failed", result.Operations[0].Result)
+		require.Equal(t, b.actual, result.Operations[0].Observation)
+	})
 }
 
 func TestRunScenario_SeedAndMemoryTTL(t *testing.T) {
@@ -599,11 +619,16 @@ func scenarioBodySeed(seed string, steps ...string) string {
 	return strings.Replace(body, `"steps":[`, seed+`"steps":[`, 1)
 }
 
-func TestRunScenarioCases_NoBackend(t *testing.T) {
+func TestRunScenario_NoBackend(t *testing.T) {
 	d, err := LoadData(dataRoot())
 	require.NoError(t, err)
 
-	results := runScenarioCases(context.Background(), d.Scenarios, nil)
+	var results []CaseResult
+	for _, c := range d.Scenarios {
+		for _, name := range c.Backends {
+			results = append(results, runScenario(context.Background(), c, name, nil))
+		}
+	}
 	require.NotEmpty(t, results)
 
 	expected := 0
@@ -618,15 +643,6 @@ func TestRunScenarioCases_NoBackend(t *testing.T) {
 		assert.NotEmpty(t, r.Backend, r.ID)
 	}
 
-	t.Run("classifyCases reports no success and no failure for unconnected backends", func(t *testing.T) {
-		for _, r := range classifyCases(d) {
-			if r.Backend == "" {
-				continue
-			}
-			assert.NotEqual(t, StatusSuccess, r.Status, r.ID)
-			assert.NotEqual(t, StatusFailure, r.Status, r.ID)
-		}
-	})
 }
 
 func TestJSONEqual(t *testing.T) {

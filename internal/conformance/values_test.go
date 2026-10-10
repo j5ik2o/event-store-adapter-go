@@ -164,19 +164,3 @@ func TestRunValueCaseUnrepresentableSequence(t *testing.T) {
 		})
 	}
 }
-
-func TestTimeValuesRemainUnverified(t *testing.T) {
-	d, err := LoadData(dataRoot())
-	require.NoError(t, err)
-	count := 0
-	for _, c := range d.Values {
-		if c.Operation == "validateOccurredAt" && c.TimePrecision != "milliseconds" {
-			count++
-			res := runValueCase(c)
-			assert.Equal(t, StatusUnverified, res.Status, c.ID)
-			assert.Equal(t, reasonTimeNoBackend, res.Reason)
-			assert.Nil(t, res.Actual, "no storage readback was performed")
-		}
-	}
-	assert.Equal(t, 7, count)
-}

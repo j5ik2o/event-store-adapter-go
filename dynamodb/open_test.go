@@ -1,15 +1,64 @@
 package dynamodb
 
 import (
+	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awsdynamodb "github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/aws/smithy-go/middleware"
 	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
 	"github.com/j5ik2o/event-store-adapter-go/v2/internal/dynamodbtest"
+	"github.com/j5ik2o/event-store-adapter-go/v2/internal/storeoptions"
+	"github.com/j5ik2o/event-store-adapter-go/v2/internal/testhook"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOpenUsesOptionHooksDuringFirstConfigurationRead(t *testing.T) {
+	recorder := dynamodbtest.NewRecorder()
+	options := configurationUnitClient(recorder).Options()
+	reads := 0
+	options.APIOptions = append(options.APIOptions, func(stack *middleware.Stack) error {
+		var input *awsdynamodb.BatchGetItemInput
+		if err := stack.Initialize.Add(middleware.InitializeMiddlewareFunc("unit-configuration-input", func(ctx context.Context, in middleware.InitializeInput, next middleware.InitializeHandler) (middleware.InitializeOutput, middleware.Metadata, error) {
+			input = in.Parameters.(*awsdynamodb.BatchGetItemInput)
+			return next.HandleInitialize(ctx, in)
+		}), middleware.Before); err != nil {
+			return err
+		}
+		return stack.Finalize.Add(middleware.FinalizeMiddlewareFunc("unit-configuration-response", func(context.Context, middleware.FinalizeInput, middleware.FinalizeHandler) (middleware.FinalizeOutput, middleware.Metadata, error) {
+			reads++
+			out := &awsdynamodb.BatchGetItemOutput{}
+			if reads == 1 {
+				out.UnprocessedKeys = input.RequestItems
+			} else {
+				out.Responses = map[string][]map[string]types.AttributeValue{}
+				for table, request := range input.RequestItems {
+					item := request.Keys[0]
+					item["store_id"] = &types.AttributeValueMemberS{Value: "unit-input-store"}
+					item["layout_version"] = &types.AttributeValueMemberN{Value: "1"}
+					out.Responses[table] = []map[string]types.AttributeValue{item}
+				}
+			}
+			return middleware.FinalizeOutput{Result: out}, middleware.Metadata{}, nil
+		}), middleware.Before)
+	})
+	hooks := testhook.New()
+	var waits []time.Duration
+	hooks.SetSleeper(func(d time.Duration) { waits = append(waits, d) })
+	opened, err := open(dynamodbtest.WithOperation(t.Context(), 0), awsdynamodb.New(options), validConfig(), nil, func(o *storeoptions.Options) error {
+		o.Hooks = hooks
+		return nil
+	})
+	require.NoError(t, err)
+	require.Same(t, hooks, opened.hooks)
+	require.Equal(t, []time.Duration{50 * time.Millisecond}, waits)
+	require.Len(t, recorder.Requests(0), 2)
+	require.Equal(t, "unit-input-store", opened.storeID)
+}
 
 func configurationSettings(t *testing.T) settings {
 	t.Helper()

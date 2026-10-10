@@ -9,6 +9,7 @@ import (
 
 	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
 	"github.com/j5ik2o/event-store-adapter-go/v2/internal/storeoptions"
+	"github.com/j5ik2o/event-store-adapter-go/v2/internal/testhook"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -61,6 +62,32 @@ func TestNewStoreSettings(t *testing.T) {
 			assert.Empty(t, journal)
 		})
 	}
+}
+
+func TestNewStoreConnectsHooksToActualHistory(t *testing.T) {
+	hooks := testhook.New()
+	keep, err := eventstore.KeepLatest(1)
+	require.NoError(t, err)
+	store, err := NewStore(eventstore.WithRetentionCount(keep), func(o *storeoptions.Options) error {
+		o.Hooks = hooks
+		return nil
+	})
+	require.NoError(t, err)
+	first := newTestEvent(t, "hook-history", 1, []byte("first"))
+	second := newTestEvent(t, "hook-history", 2, []byte("second"))
+	require.NoError(t, store.persistEventAndSnapshot(t.Context(), first, newTestSnapshot(t, 1, []byte("first state"))))
+	before, err := hooks.History(first.AggregateID())
+	require.NoError(t, err)
+	require.Equal(t, []int64{1}, before.Active)
+	before.Active[0] = 99
+	afterMutation, err := hooks.History(first.AggregateID())
+	require.NoError(t, err)
+	require.Equal(t, []int64{1}, afterMutation.Active)
+	require.NoError(t, store.persistEventAndSnapshot(t.Context(), second, newTestSnapshot(t, 2, []byte("second state"))))
+	after, err := hooks.History(first.AggregateID())
+	require.NoError(t, err)
+	require.Equal(t, []int64{2}, after.Active, "the same hooks read the retained state of the same store")
+	require.Empty(t, after.Marked)
 }
 
 func TestNewStoreRejectsConfiguration(t *testing.T) {
