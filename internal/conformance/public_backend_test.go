@@ -365,6 +365,9 @@ func (b *publicBackend) Observe(ctx context.Context, operation int, step conform
 		aid := step.AID.TypeName + "-" + step.AID.Value
 		active, marked := []any{}, []any{}
 		if b.name == "memory" {
+			if b.store == nil {
+				return nil, fmt.Errorf("history observation requires an opened memory store")
+			}
 			h, err := b.store.hooks.History(aid)
 			if err != nil {
 				return nil, err

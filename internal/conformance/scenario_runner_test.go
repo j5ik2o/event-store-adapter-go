@@ -545,6 +545,26 @@ func TestRunScenario_ObservationConnection(t *testing.T) {
 	}
 }
 
+func TestRunScenarioOpenFailureIndependentObservations(t *testing.T) {
+	for _, observation := range []string{`{}`, `{"history":{"active":[],"marked":[],"absent":[]}}`} {
+		t.Run("fallback "+observation, func(t *testing.T) {
+			b := &fakeBackend{name: "memory", openErr: &OperationError{Category: "configuration", Message: "open failed"}}
+			init := `{"expect":{"error":{"category":"configuration"}},"observe":` + observation + `}`
+			result := runScenario(t.Context(), mkCase(t, scenarioBody(init, "")), "memory", b)
+			require.Equal(t, StatusSuccess, result.Status, result.Reason)
+			require.Equal(t, "configuration: open failed", result.Operations[0].Result)
+		})
+	}
+	t.Run("connected reader", func(t *testing.T) {
+		b := &observedBackend{fakeBackend: &fakeBackend{name: "memory", openErr: &OperationError{Category: "configuration", Message: "open failed"}}, actual: map[string]any{"notifications": []any{}}}
+		init := `{"expect":{"error":{"category":"configuration"}},"observe":{"notifications":[]}}`
+		result := runScenario(t.Context(), mkCase(t, scenarioBody(init, "")), "memory", b)
+		require.Equal(t, StatusSuccess, result.Status, result.Reason)
+		require.Equal(t, "configuration: open failed", result.Operations[0].Result)
+		require.Equal(t, b.actual, result.Operations[0].Observation)
+	})
+}
+
 func TestRunScenario_SeedAndMemoryTTL(t *testing.T) {
 	ctx := context.Background()
 

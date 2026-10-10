@@ -61,12 +61,45 @@ func TestObservationComparison(t *testing.T) {
 
 type ownedBackend struct {
 	*fakeBackend
-	cleaned    int
-	cleanupErr error
+	cleaned          int
+	cleanupErr       error
+	preparedBackends []*fakeBackend
+	cleanedAtPrepare []int
 }
 
 func (b *ownedBackend) Prepare(context.Context, *ScenarioPlan) (Backend, func() error, error) {
-	return b.fakeBackend, func() error { b.cleaned++; return b.cleanupErr }, nil
+	b.cleanedAtPrepare = append(b.cleanedAtPrepare, b.cleaned)
+	prepared := b.fakeBackend
+	if len(b.preparedBackends) > 0 {
+		prepared, b.preparedBackends = b.preparedBackends[0], b.preparedBackends[1:]
+	}
+	return prepared, func() error { b.cleaned++; return b.cleanupErr }, nil
+}
+
+func TestRunBackendOpenFailureNotifications(t *testing.T) {
+	cause := &OperationError{Category: "configuration", Message: "retention_count must be positive"}
+	failed := mkCase(t, scenarioBody(`{"expect":{"error":{"category":"configuration"}},"observe":{"notifications":[]}}`, ""))
+	next := mkCase(t, scenarioBody(`{"expect":{"result":"success"},"observe":{"notifications":["retention-failure"]}}`, "",
+		stepObserve("persistEvent", `{"event":"e1"}`, `{"result":"success"}`, `{"history":{"active":[1],"marked":[],"absent":[]},"notifications":["retention-failure"]}`)))
+	first := &fakeBackend{name: "memory", openErr: cause}
+	second := &fakeBackend{name: "memory", active: []int64{1}, notifications: []string{"retention-failure"}}
+	owner := &ownedBackend{fakeBackend: first, preparedBackends: []*fakeBackend{first, second}}
+
+	var results []CaseResult
+	require.NotPanics(t, func() {
+		results = RunBackend(t.Context(), &Data{Scenarios: []ScenarioCase{failed, next}}, owner)
+	})
+
+	require.Len(t, results, 2)
+	require.Equal(t, StatusFailure, results[0].Status)
+	require.Contains(t, results[0].Reason, "notifications")
+	require.NotNil(t, results[0].FailedStep)
+	require.Zero(t, *results[0].FailedStep)
+	require.Equal(t, []OperationResult{{Number: 0, Result: "configuration: " + cause.Message}}, results[0].Operations)
+	require.Equal(t, StatusSuccess, results[1].Status, results[1].Reason)
+	require.Equal(t, []string{"persistEvent"}, second.calls)
+	require.Equal(t, 2, owner.cleaned)
+	require.Equal(t, []int{0, 1}, owner.cleanedAtPrepare, "the failed case must be cleaned before preparing the next case")
 }
 func TestScenarioOwnershipAndFaultReport(t *testing.T) {
 	for _, failOpen := range []bool{false, true} {

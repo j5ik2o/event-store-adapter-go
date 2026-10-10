@@ -20,6 +20,9 @@ func compareObservation(ctx context.Context, operation int, step StepPlan, hooks
 				return "observation reader is not connected: " + key
 			}
 		}
+		if _, requested := step.Observe["notifications"]; requested && store == nil {
+			return "notifications observation requires an opened store"
+		}
 		return checkObservation(step, hooks, store)
 	}
 	actual, err := reader.Observe(ctx, operation, step)
