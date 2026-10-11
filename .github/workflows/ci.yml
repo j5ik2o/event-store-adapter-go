@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.14"
+          python-version: "3.15"
       - name: Verify conformance data
         run: |
           python3 tools/conformance/manifest.py verify
@@ -38,7 +38,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.14"
+          python-version: "3.15"
       - name: Test semver detection
         run: python3 -m unittest discover -s .github -p 'test_semver_level.py' -v
       - uses: actions/setup-go@v7
