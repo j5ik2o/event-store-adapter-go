@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/j5ik2o/event-store-adapter-go/v2/internal/testhook"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/testhook"
 )
 
 // Backend is the boundary between the runner and a storage backend. It creates stores for

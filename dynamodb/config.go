@@ -6,8 +6,8 @@ import (
 	"fmt"
 
 	awsdynamodb "github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
-	"github.com/j5ik2o/event-store-adapter-go/v2/internal/storeoptions"
+	eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/storeoptions"
 )
 
 // Config names the externally provisioned tables and snapshot history index.

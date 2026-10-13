@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 
-	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
-	"github.com/j5ik2o/event-store-adapter-go/v2/internal/testhook"
+	eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/testhook"
 )
 
 // persistEvent commits an already serialized event. Validation and payload copying

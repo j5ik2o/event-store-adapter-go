@@ -8,7 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsdynamodb "github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
+	eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
 )
 
 // GetLatestSnapshotByID reads head and current snapshot strongly consistently,

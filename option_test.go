@@ -7,7 +7,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/j5ik2o/event-store-adapter-go/v2/internal/storeoptions"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/storeoptions"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

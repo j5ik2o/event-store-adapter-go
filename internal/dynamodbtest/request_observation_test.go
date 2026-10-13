@@ -9,7 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	"github.com/j5ik2o/event-store-adapter-go/v2/internal/conformance"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/conformance"
 	"github.com/stretchr/testify/require"
 )
 

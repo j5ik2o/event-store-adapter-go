@@ -1,8 +1,8 @@
 package memory
 
 import (
-	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
-	"github.com/j5ik2o/event-store-adapter-go/v2/internal/testhook"
+	eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/testhook"
 )
 
 // getLatestSnapshotByID atomically copies the serialized current snapshot and head number.

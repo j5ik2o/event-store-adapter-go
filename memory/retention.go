@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"slices"
 
-	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
-	"github.com/j5ik2o/event-store-adapter-go/v2/internal/testhook"
+	eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/testhook"
 )
 
 // retainHistory runs after publication while the commit still owns the Store lock.

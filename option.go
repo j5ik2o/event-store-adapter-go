@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/j5ik2o/event-store-adapter-go/v2/internal/storeoptions"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/storeoptions"
 )
 
 // RetentionMode selects how excess snapshot history is removed.

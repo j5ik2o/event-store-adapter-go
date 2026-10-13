@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 
-	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
+	eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
 )
 
 // persistEventAndSnapshot commits an already serialized event and snapshot together.

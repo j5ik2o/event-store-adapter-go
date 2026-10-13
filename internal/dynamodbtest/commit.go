@@ -10,7 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/smithy-go/middleware"
-	"github.com/j5ik2o/event-store-adapter-go/v2/internal/conformance"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/conformance"
 )
 
 type commitInputKey struct{}

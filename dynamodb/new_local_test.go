@@ -13,9 +13,9 @@ import (
 	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
 	awsdynamodb "github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
-	"github.com/j5ik2o/event-store-adapter-go/v2/dynamodb"
-	"github.com/j5ik2o/event-store-adapter-go/v2/internal/dynamodbtest"
+	eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
+	"github.com/j5ik2o/event-store-adapter-go/v5/dynamodb"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/dynamodbtest"
 	"github.com/stretchr/testify/require"
 )
 

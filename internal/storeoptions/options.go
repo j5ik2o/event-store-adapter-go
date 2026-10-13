@@ -6,7 +6,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/j5ik2o/event-store-adapter-go/v2/internal/testhook"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/testhook"
 )
 
 // RetentionMode is the internal representation shared with eventstore.

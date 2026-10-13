@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
-	"github.com/j5ik2o/event-store-adapter-go/v2/memory"
+	eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
+	"github.com/j5ik2o/event-store-adapter-go/v5/memory"
 )
 
 type orderID string

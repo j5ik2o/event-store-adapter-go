@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
+	eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
 	"github.com/stretchr/testify/require"
 )
 

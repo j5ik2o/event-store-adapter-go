@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
-	"github.com/j5ik2o/event-store-adapter-go/v2/internal/storeoptions"
-	"github.com/j5ik2o/event-store-adapter-go/v2/internal/testhook"
+	eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/storeoptions"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/testhook"
 )
 
 // Store owns records, immutable settings and a lock for the whole storage destination.
