@@ -21,6 +21,8 @@ jobs:
         with:
           go-version: '1.27'
       - run: make vet
+      - name: Run staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10

@@ -2,7 +2,7 @@
 
 [English](DATABASE_SCHEMA.md)
 
-共通仕様 v4 に対応する配置の版は1です。Go module は `/v2` です。`dynamodb.New` の前に、利用者が異なる3表と snapshot の履歴 GSI を作ります。
+[共通契約 v4](https://github.com/j5ik2o/event-store-adapter/blob/main/docs/spec/README.md) に対応する配置の版は1です。Go module は `/v2` です（共通契約の版 v4 と module のメジャー版 `/v2` は別の番号です）。`dynamodb.New` の前に、利用者が異なる3表と snapshot の履歴 GSI を作ります。
 
 | 表 | パーティションキー | ソートキー | 追加設定 |
 |---|---|---|---|

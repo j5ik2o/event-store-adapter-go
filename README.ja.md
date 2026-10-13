@@ -10,7 +10,7 @@
 
 [English](./README.md)
 
-共通仕様 v4 に従います。Go の module パスは `github.com/j5ik2o/event-store-adapter-go/v2` のままです。共通仕様の版と Go の配布版は別のものです。
+[共通契約 v4](https://github.com/j5ik2o/event-store-adapter/blob/main/docs/spec/README.md) に従います。Go の module パスは `github.com/j5ik2o/event-store-adapter-go/v2` のままです。共通契約の版（v4）と Go module のメジャー版（`/v2`）は別の番号です。
 
 ## 使い方
 
