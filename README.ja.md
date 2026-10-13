@@ -10,7 +10,13 @@
 
 [English](./README.md)
 
-[共通契約 v4](https://github.com/j5ik2o/event-store-adapter/blob/main/docs/spec/README.md) に従います。Go の module パスは `github.com/j5ik2o/event-store-adapter-go/v2` のままです。共通契約の版（v4）と Go module のメジャー版（`/v2`）は別の番号です。
+[共通契約 v5](https://github.com/j5ik2o/event-store-adapter/blob/main/docs/spec/README.md) に従います。メジャーの番号 5 は、共通契約の版と同じです。
+
+導入:
+
+```sh
+go get github.com/j5ik2o/event-store-adapter-go/v5
+```
 
 ## 使い方
 
@@ -26,8 +32,8 @@ import (
 	"fmt"
 	"time"
 
-	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
-	"github.com/j5ik2o/event-store-adapter-go/v2/memory"
+	eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
+	"github.com/j5ik2o/event-store-adapter-go/v5/memory"
 )
 
 type orderID string
@@ -111,8 +117,8 @@ func main() {
 import (
     "context"
     awsdb "github.com/aws/aws-sdk-go-v2/service/dynamodb"
-    eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
-    "github.com/j5ik2o/event-store-adapter-go/v2/dynamodb"
+    eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
+    "github.com/j5ik2o/event-store-adapter-go/v5/dynamodb"
 )
 
 func openDynamoDB(ctx context.Context, client *awsdb.Client) (eventstore.EventStore[orderEvent, orderState], error) {

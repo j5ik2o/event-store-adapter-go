@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/j5ik2o/event-store-adapter-go/v2/internal/testhook"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/testhook"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
-	"github.com/j5ik2o/event-store-adapter-go/v2/internal/conformance"
-	"github.com/j5ik2o/event-store-adapter-go/v2/internal/testhook"
+	eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/conformance"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/testhook"
 	"github.com/stretchr/testify/require"
 )
 

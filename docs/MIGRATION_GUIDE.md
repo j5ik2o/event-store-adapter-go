@@ -2,7 +2,7 @@
 
 [日本語](MIGRATION_GUIDE.ja.md)
 
-The source implements [common contract v4](https://github.com/j5ik2o/event-store-adapter/blob/main/docs/spec/README.md); the contract version (v4) and the Go module major version (`/v2`) are separate numbers, and the Go module path remains `github.com/j5ik2o/event-store-adapter-go/v2`. This does not change the distribution version or announce a release.
+This library follows [common contract v5](https://github.com/j5ik2o/event-store-adapter/blob/main/docs/spec/README.md); its major version 5 matches the contract revision. The Go module path is `github.com/j5ik2o/event-store-adapter-go/v5`.
 
 ## Code changes
 

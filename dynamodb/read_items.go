@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
+	eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
 )
 
 var decimalNumber = regexp.MustCompile(`^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$`)

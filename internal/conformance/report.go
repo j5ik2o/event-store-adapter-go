@@ -148,7 +148,7 @@ func BuildReport(m ManifestResult, results []CaseResult, excluded []RuleExclusio
 		DataVersion:    DataVersion,
 		Manifest:       m,
 		Language:       "go",
-		Implementation: Implementation{Name: "github.com/j5ik2o/event-store-adapter-go/v2", Version: version},
+		Implementation: Implementation{Name: "github.com/j5ik2o/event-store-adapter-go/v5", Version: version},
 		Backends:       []BackendState{{Name: "memory"}, {Name: "dynamodb"}},
 		Summary:        zeroCounts(),
 		Rules:          map[string]map[Status]int{},

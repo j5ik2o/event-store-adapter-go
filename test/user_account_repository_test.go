@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
-	"github.com/j5ik2o/event-store-adapter-go/v2/dynamodb"
-	"github.com/j5ik2o/event-store-adapter-go/v2/internal/dynamodbtest"
-	"github.com/j5ik2o/event-store-adapter-go/v2/memory"
+	eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
+	"github.com/j5ik2o/event-store-adapter-go/v5/dynamodb"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/dynamodbtest"
+	"github.com/j5ik2o/event-store-adapter-go/v5/memory"
 	"github.com/stretchr/testify/require"
 )
 

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/j5ik2o/event-store-adapter-go/v2/internal/conformance"
-	"github.com/j5ik2o/event-store-adapter-go/v2/internal/dynamodbtest"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/conformance"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/dynamodbtest"
 	"github.com/stretchr/testify/require"
 )
 

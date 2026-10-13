@@ -11,6 +11,11 @@ on:
           - patch
           - minor
           - major
+      version:
+        description: Release version X.Y.Z (empty uses level)
+        type: string
+        required: false
+        default: ""
 jobs:
   bump-version:
     runs-on: ubuntu-latest
@@ -29,6 +34,15 @@ jobs:
           LATEST_TAG=$(git describe --abbrev=0 --tags)
           echo "LATEST_TAG=$LATEST_TAG"
           echo "prev_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
+      - name: Validate the requested version
+        id: requested_version
+        if: inputs.version != ''
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          VERSION=$(git tag --list 'v*' | sort -V | python3 "${GITHUB_WORKSPACE}"/.github/release-version.py "$REQUESTED_VERSION")
+          echo "VERSION=$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Calculate changes from the latest tag to HEAD
         id: changes
         run: |
@@ -50,17 +64,23 @@ jobs:
           fi
           echo "SEMVER_LEVEL=$SEMVER_LEVEL"
           echo "semver_level=$SEMVER_LEVEL" >> "$GITHUB_OUTPUT"
-        if: steps.changes.outputs.count > 0 || inputs.level != 'auto'
+        if: inputs.version == '' && (steps.changes.outputs.count > 0 || inputs.level != 'auto')
       - name: Get the next version
         id: versions
+        env:
+          REQUESTED_VERSION: ${{ steps.requested_version.outputs.version }}
         run: |
-          NEXT_VERSION=$(echo ${{ steps.defines.outputs.prev_tag }} | python3 "${GITHUB_WORKSPACE}"/.github/next-semver.py ${{ steps.semver_level.outputs.semver_level }})
+          if [[ -n "$REQUESTED_VERSION" ]]; then
+            NEXT_VERSION="$REQUESTED_VERSION"
+          else
+            NEXT_VERSION=$(echo ${{ steps.defines.outputs.prev_tag }} | python3 "${GITHUB_WORKSPACE}"/.github/next-semver.py ${{ steps.semver_level.outputs.semver_level }})
+          fi
           echo "NEXT_VERSION=$NEXT_VERSION"
           echo "next_version=$NEXT_VERSION" >> "$GITHUB_OUTPUT"
           echo "next_tag=v$NEXT_VERSION" >> "$GITHUB_OUTPUT"
-        if: steps.changes.outputs.count > 0 || inputs.level != 'auto'
+        if: inputs.version != '' || steps.changes.outputs.count > 0 || inputs.level != 'auto'
       - name: set the next version
-        if: steps.changes.outputs.count > 0 || inputs.level != 'auto'
+        if: inputs.version != '' || steps.changes.outputs.count > 0 || inputs.level != 'auto'
         run: |
           echo ${{ steps.versions.outputs.next_version }} > version
       - name: git commit & push
@@ -74,7 +94,7 @@ jobs:
           git push origin main
           COMMIT_SHA=$(git rev-parse HEAD)
           echo "commit_sha=$COMMIT_SHA" >> "$GITHUB_OUTPUT"
-        if: steps.changes.outputs.count > 0 || inputs.level != 'auto'
+        if: inputs.version != '' || steps.changes.outputs.count > 0 || inputs.level != 'auto'
       - name: tagging and push tag
         id: tag_version
         run: |
@@ -90,7 +110,7 @@ jobs:
             -P --grep='^(BREAKING CHANGE|BREAKING-CHANGE|build|ci|feat|fix|docs|style|refactor|perf|test|revert|chore)(.*)?:.*$' \
             --no-merges --full-history | \
             python3 "${GITHUB_WORKSPACE}"/.github/create-release-note-body.py >> changelog.txt
-        if: steps.changes.outputs.count > 0 || inputs.level != 'auto'
+        if: inputs.version != '' || steps.changes.outputs.count > 0 || inputs.level != 'auto'
       - name: Create a GitHub release
         uses: actions/create-release@v1
         env:
@@ -99,4 +119,4 @@ jobs:
           tag_name: ${{ steps.versions.outputs.next_tag }}
           release_name: Release ${{ steps.versions.outputs.next_tag }}
           body_path: changelog.txt
-        if: steps.changes.outputs.count > 0 || inputs.level != 'auto'
+        if: inputs.version != '' || steps.changes.outputs.count > 0 || inputs.level != 'auto'

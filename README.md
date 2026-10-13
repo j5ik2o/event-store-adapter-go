@@ -11,7 +11,11 @@ This library provides a synchronous event store for CQRS/Event Sourcing with Mem
 
 [日本語](./README.ja.md)
 
-The source follows [common contract v4](https://github.com/j5ik2o/event-store-adapter/blob/main/docs/spec/README.md). The Go module remains `github.com/j5ik2o/event-store-adapter-go/v2`; the contract version (v4) and the Go module major version (`/v2`) are separate numbers.
+This library follows [common contract v5](https://github.com/j5ik2o/event-store-adapter/blob/main/docs/spec/README.md); its major version 5 matches the contract revision.
+
+```sh
+go get github.com/j5ik2o/event-store-adapter-go/v5
+```
 
 ## Usage
 
@@ -27,8 +31,8 @@ import (
 	"fmt"
 	"time"
 
-	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
-	"github.com/j5ik2o/event-store-adapter-go/v2/memory"
+	eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
+	"github.com/j5ik2o/event-store-adapter-go/v5/memory"
 )
 
 type orderID string
@@ -112,8 +116,8 @@ Provision the three tables and history index described in [DATABASE_SCHEMA.md](d
 import (
     "context"
     awsdb "github.com/aws/aws-sdk-go-v2/service/dynamodb"
-    eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
-    "github.com/j5ik2o/event-store-adapter-go/v2/dynamodb"
+    eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
+    "github.com/j5ik2o/event-store-adapter-go/v5/dynamodb"
 )
 
 func openDynamoDB(ctx context.Context, client *awsdb.Client) (eventstore.EventStore[orderEvent, orderState], error) {

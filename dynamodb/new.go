@@ -4,8 +4,8 @@ import (
 	"context"
 
 	awsdynamodb "github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
-	"github.com/j5ik2o/event-store-adapter-go/v2/internal/testhook"
+	eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/testhook"
 )
 
 // New validates dependencies and options, confirms the stored configuration and

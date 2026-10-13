@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
+	eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
 )
 
 // New connects payload serializers to a Store. Instances using the same Store

@@ -18,10 +18,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/smithy-go"
 	"github.com/aws/smithy-go/middleware"
-	eventstore "github.com/j5ik2o/event-store-adapter-go/v2"
-	"github.com/j5ik2o/event-store-adapter-go/v2/internal/conformance"
-	"github.com/j5ik2o/event-store-adapter-go/v2/internal/dynamodbtest"
-	"github.com/j5ik2o/event-store-adapter-go/v2/internal/testhook"
+	eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/conformance"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/dynamodbtest"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/testhook"
 	"github.com/stretchr/testify/require"
 )
 
