@@ -42,7 +42,7 @@ jobs:
         with:
           python-version: "3.15"
       - name: Test semver detection
-        run: python3 -m unittest discover -s .github -p 'test_semver_level.py' -v
+        run: python3 -m unittest discover -s .github -p 'test_*.py' -v
       - uses: actions/setup-go@v7
         with:
           go-version: '1.27'
