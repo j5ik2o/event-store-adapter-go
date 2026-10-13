@@ -103,6 +103,8 @@ func main() {
 }
 ```
 
+メモリの保存先は単一プロセスのメモリだけを使います。ファイルへの保存、再起動後の回復、プロセス間の共有はしません。
+
 イベントの `SeqNr` は1から始まる連番です。番号の範囲は0〜9007199254740991で、イベントに0は使えません。`OccurredAt` は符号付き64ビットの Unix ナノ秒で表せる `time.Time` です。任意指定の `WithManifest` は、省略時に空文字列となります。
 
 `PersistEvent` はイベント番号から直前の head 番号を求めて照合します。`PersistEventAndSnapshot` はイベントと snapshot の番号が等しいことを要求し、一緒に確定します。version 引数と `IsCreated` は使いません。
@@ -111,7 +113,7 @@ func main() {
 
 ## DynamoDB
 
-[DATABASE_SCHEMA.ja.md](docs/DATABASE_SCHEMA.ja.md) の3表と履歴 index を事前に作り、AWS SDK v2 の Client を渡します。上の domain 型を使う factory は次のとおりです。
+[DATABASE_SCHEMA.ja.md](docs/DATABASE_SCHEMA.ja.md) の3表と履歴 index を事前に作り、AWS SDK v2 の Client を渡します。3 つの表は同じリージョンに置き、書き込みもそのリージョンからだけ行ってください。グローバルテーブル（複数リージョンのレプリカ）は範囲外です。上の domain 型を使う factory は次のとおりです。
 
 ```go
 import (

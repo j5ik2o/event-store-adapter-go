@@ -102,6 +102,8 @@ func main() {
 }
 ```
 
+The memory storage lives in a single process. It does not persist to files, survive restarts, or share data across processes.
+
 Events use consecutive `SeqNr` values starting at 1; the allowed range is 0–9007199254740991, with 0 reserved for non-event sequence values. `OccurredAt` is a `time.Time` within the signed 64-bit Unix nanosecond range. Optional `WithManifest` metadata defaults to an empty string.
 
 `PersistEvent` derives the expected previous head from the event number. `PersistEventAndSnapshot` requires equal event and snapshot numbers and commits them together. There is no version argument or `IsCreated` flag.
@@ -110,7 +112,7 @@ Events use consecutive `SeqNr` values starting at 1; the allowed range is 0–90
 
 ## DynamoDB
 
-Provision the three tables and history index described in [DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md), then supply an AWS SDK v2 client. With the domain types above, the factory is:
+Provision the three tables and history index described in [DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md), then supply an AWS SDK v2 client. Keep the three tables in one Region and write to them only from that Region. Global tables (multi-Region replicas) are not supported. With the domain types above, the factory is:
 
 ```go
 import (

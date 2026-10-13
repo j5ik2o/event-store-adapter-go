@@ -10,6 +10,8 @@ This is layout version 1 for [common contract v5](https://github.com/j5ik2o/even
 | snapshot | `aid` S | `skey` N | History GSI: (`aid` S, `active_history_seq_nr` N), `KEYS_ONLY`; no Streams; enable TTL on `ttl` when using TTL retention |
 | head | `aid` S | None | Streams enabled, `NEW_IMAGE`; no GSI or TTL |
 
+Keep the three tables in one Region and write to them only from that Region. Global tables (multi-Region replicas) are not supported.
+
 `aid` is the validated type name, a hyphen, and the ID value. The library does not use shards or a KeyResolver.
 
 ## Stored attributes

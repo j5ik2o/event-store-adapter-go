@@ -14,7 +14,7 @@ all: test
 
 .PHONY: test
 test:
-	$(GOTEST) -v ./...
+	$(GOTEST) -race -v ./...
 
 .PHONY: clean
 clean:
