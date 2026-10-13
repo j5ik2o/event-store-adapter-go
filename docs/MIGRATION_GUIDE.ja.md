@@ -2,7 +2,7 @@
 
 [English](MIGRATION_GUIDE.md)
 
-共通仕様 v4 に対応する Source です。Go module パスは `github.com/j5ik2o/event-store-adapter-go/v2` のままです。配布版番号の変更やリリースの案内ではありません。
+[共通契約 v4](https://github.com/j5ik2o/event-store-adapter/blob/main/docs/spec/README.md) に対応する Source です。共通契約の版（v4）と Go module のメジャー版（`/v2`）は別の番号です。Go module パスは `github.com/j5ik2o/event-store-adapter-go/v2` のままです。配布版番号の変更やリリースの案内ではありません。
 
 ## コードの移行
 

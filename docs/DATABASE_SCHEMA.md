@@ -2,7 +2,7 @@
 
 [日本語](DATABASE_SCHEMA.ja.md)
 
-This is layout version 1 for the common v4 contract, used by the Go `/v2` module. The caller provisions three distinct tables and the snapshot history GSI before `dynamodb.New`.
+This is layout version 1 for [common contract v4](https://github.com/j5ik2o/event-store-adapter/blob/main/docs/spec/README.md), used by the Go `/v2` module (the contract version v4 and the module major version `/v2` are separate numbers). The caller provisions three distinct tables and the snapshot history GSI before `dynamodb.New`.
 
 | Table | Partition key | Sort key | Additional configuration |
 |---|---|---|---|

@@ -11,7 +11,7 @@ This library provides a synchronous event store for CQRS/Event Sourcing with Mem
 
 [日本語](./README.ja.md)
 
-The source follows common specification v4. The Go module remains `github.com/j5ik2o/event-store-adapter-go/v2`; the specification version and Go distribution version are independent.
+The source follows [common contract v4](https://github.com/j5ik2o/event-store-adapter/blob/main/docs/spec/README.md). The Go module remains `github.com/j5ik2o/event-store-adapter-go/v2`; the contract version (v4) and the Go module major version (`/v2`) are separate numbers.
 
 ## Usage
 

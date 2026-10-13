@@ -188,7 +188,6 @@ func mkCase(t *testing.T, body string) ScenarioCase {
 }
 
 var (
-	aidArgs        = `{"aggregate_id":{"type_name":"Order","value":"1"}}`
 	persistOK      = step("persistEvent", `{"event":"e1"}`, `{"result":"success"}`)
 	persistTwoOK   = step("persistEvent", `{"event":"e2"}`, `{"result":"success"}`)
 	readFrom1Both  = step("getEventsByIdSinceSeqNr", `{"aggregate_id":{"type_name":"Order","value":"1"},"seq_nr":1}`, `{"result":"events","events":["e1","e2"]}`)
