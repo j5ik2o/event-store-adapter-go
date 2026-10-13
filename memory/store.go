@@ -4,6 +4,7 @@ package memory
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -52,7 +53,7 @@ func (s storedSnapshot) clone() storedSnapshot {
 	return s
 }
 
-// NewStore applies common options once and rejects TTL retention, even without history.
+// NewStore applies common options once and rejects unknown modes and TTL retention, even without history.
 // The store keeps its own copy of the applied settings.
 func NewStore(opts ...eventstore.Option) (*Store, error) {
 	settings, err := storeoptions.Apply(func(cause error) error {
@@ -61,8 +62,12 @@ func NewStore(opts ...eventstore.Option) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if settings.RetentionMode == storeoptions.RetentionTTL {
+	switch settings.RetentionMode {
+	case storeoptions.RetentionDelete:
+	case storeoptions.RetentionTTL:
 		return nil, &eventstore.ConfigurationError{Cause: errors.New("memory does not support TTL retention")}
+	default:
+		return nil, &eventstore.ConfigurationError{Cause: fmt.Errorf("invalid retention mode: %d", settings.RetentionMode)}
 	}
 	if settings.RetentionCount != nil {
 		count := *settings.RetentionCount

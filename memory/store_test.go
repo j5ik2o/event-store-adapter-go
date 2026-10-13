@@ -47,7 +47,6 @@ func TestNewStoreSettings(t *testing.T) {
 		{name: "explicit no retention", opts: []eventstore.Option{eventstore.WithRetentionCount(eventstore.NoRetention())}, mode: storeoptions.RetentionDelete},
 		{name: "positive count", opts: []eventstore.Option{eventstore.WithRetentionCount(count), eventstore.WithTTLGraceSeconds(9)}, count: &positiveCount, mode: storeoptions.RetentionDelete, grace: 9},
 		{name: "options in order", opts: []eventstore.Option{eventstore.WithRetentionCount(count), eventstore.WithRetentionCount(eventstore.NoRetention()), eventstore.WithTTLGraceSeconds(1), eventstore.WithTTLGraceSeconds(7)}, mode: storeoptions.RetentionDelete, grace: 7},
-		{name: "mode ignored without history", opts: []eventstore.Option{eventstore.WithRetentionMode(99)}, mode: 99},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, err := NewStore(tc.opts...)
@@ -100,6 +99,8 @@ func TestNewStoreRejectsConfiguration(t *testing.T) {
 		{"zero value retention", []eventstore.Option{eventstore.WithRetentionCount(eventstore.RetentionCount{})}},
 		{"numeric zero retention", []eventstore.Option{func(o *storeoptions.Options) error { n := 0; o.RetentionCount = &n; return nil }}},
 		{"negative retention", []eventstore.Option{func(o *storeoptions.Options) error { n := -1; o.RetentionCount = &n; return nil }}},
+		{"unknown mode without history", []eventstore.Option{eventstore.WithRetentionMode(99)}},
+		{"unknown mode with no retention", []eventstore.Option{eventstore.WithRetentionCount(eventstore.NoRetention()), eventstore.WithRetentionMode(99)}},
 		{"TTL without history", []eventstore.Option{eventstore.WithRetentionMode(eventstore.RetentionTTL)}},
 		{"TTL with no retention", []eventstore.Option{eventstore.WithRetentionCount(eventstore.NoRetention()), eventstore.WithRetentionMode(eventstore.RetentionTTL)}},
 		{"TTL with history", []eventstore.Option{eventstore.WithRetentionCount(count), eventstore.WithRetentionMode(eventstore.RetentionTTL)}},

@@ -10,6 +10,8 @@
 | snapshot | `aid` S | `skey` N | 履歴 GSI: (`aid` S, `active_history_seq_nr` N)、`KEYS_ONLY`。Streams なし。TTL 保持時は属性 `ttl` の TTL を有効化 |
 | head | `aid` S | なし | Streams を `NEW_IMAGE` で有効化。GSI・TTL なし |
 
+3 つの表は同じリージョンに置き、書き込みもそのリージョンからだけ行ってください。グローバルテーブル（複数リージョンのレプリカ）は範囲外です。
+
 `aid` は検査済みの型名・ハイフン・ID値を連結します。シャードと KeyResolver は使いません。
 
 ## 保存属性
