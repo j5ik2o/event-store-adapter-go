@@ -2,10 +2,11 @@
 
 `surface.json` is a verbatim copy of the language-neutral API surface defined in
 [j5ik2o/event-store-adapter](https://github.com/j5ik2o/event-store-adapter/tree/main/api-surface)
-(surface format 0.1.0). CI verifies its SHA-256 in the `lint` job. Passing this check is an acceptance criterion
+(surface format 0.1.0). CI verifies its SHA-256 in the `lint` job.
+`go.json` maps the common names to the public API of the root package `eventstore`.
+Passing the API surface check in `internal/apisurface` (below) is an acceptance criterion
 (item 4 of section 5 of the hub's
 [implementation plan](https://github.com/j5ik2o/event-store-adapter/blob/main/docs/plan/implementation-plan.md)).
-`go.json` maps the common names to the public API of the root package `eventstore`.
 
 ## How to run
 
