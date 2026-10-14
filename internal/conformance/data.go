@@ -11,7 +11,7 @@ import (
 )
 
 // DataVersion is the only supported version of the conformance data.
-const DataVersion = "1.0.0"
+const DataVersion = "1.1.0"
 
 // ValueInput is the input of a value-table case. Integers are kept without loss of precision.
 type ValueInput struct {
@@ -111,6 +111,8 @@ func expectedFormat(rel string) (string, bool) {
 	case path.Dir(rel) == "values" && strings.HasSuffix(rel, ".json"):
 		return "values", true
 	case path.Dir(rel) == "dynamodb" && strings.HasSuffix(rel, ".json"):
+		return "scenarios", true
+	case path.Dir(rel) == "memory" && strings.HasSuffix(rel, ".json"):
 		return "scenarios", true
 	case strings.HasPrefix(rel, "scenarios/") && strings.HasSuffix(rel, ".json"):
 		return "scenarios", true

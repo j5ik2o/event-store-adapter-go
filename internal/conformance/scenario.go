@@ -219,6 +219,13 @@ func parseStoreConfig(m map[string]any) (StoreConfig, error) {
 	if c.RetryLimit, err = optInt64(m, "retry_limit"); err != nil {
 		return c, err
 	}
+	if v, present := m["change_feed"]; present {
+		b, ok := v.(bool)
+		if !ok {
+			return c, fmt.Errorf("change_feed is not a boolean")
+		}
+		c.ChangeFeed = b
+	}
 	return c, nil
 }
 

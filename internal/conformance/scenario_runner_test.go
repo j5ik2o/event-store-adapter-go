@@ -669,3 +669,49 @@ func TestJSONEqual(t *testing.T) {
 		assert.False(t, jsonEqual(parse(`"\u00e9"`), parse(`"e\u0301"`)))
 	})
 }
+
+func TestRunScenario_ChangeFeed(t *testing.T) {
+	ctx := context.Background()
+	withStore := func(store string) string {
+		return strings.Replace(scenarioBody("", "", persistOK), `"store":{"retention_count":null,"retention_mode":"delete"}`, `"store":`+store, 1)
+	}
+
+	t.Run("a change feed request is unrepresentable with a reason and never opens a store", func(t *testing.T) {
+		b := &fakeBackend{name: "memory", injectable: true}
+		c := mkCase(t, withStore(`{"retention_count":null,"retention_mode":"delete","change_feed":true}`))
+		assert.True(t, c.Plan.Store.ChangeFeed)
+		r := runScenario(ctx, c, "memory", b)
+		assert.Equal(t, StatusUnrepresentable, r.Status, r.Reason)
+		assert.NotEmpty(t, r.Reason)
+		assert.Equal(t, int32(0), b.opens)
+		assert.Empty(t, b.calls)
+	})
+
+	t.Run("a missing change_feed means false and the scenario runs", func(t *testing.T) {
+		b := &fakeBackend{name: "memory", injectable: true}
+		c := mkCase(t, scenarioBody("", "", persistOK))
+		assert.False(t, c.Plan.Store.ChangeFeed)
+		r := runScenario(ctx, c, "memory", b)
+		assert.Equal(t, StatusSuccess, r.Status, r.Reason)
+		assert.Equal(t, int32(1), b.opens)
+	})
+
+	t.Run("change_feed false runs the scenario", func(t *testing.T) {
+		b := &fakeBackend{name: "memory", injectable: true}
+		c := mkCase(t, withStore(`{"retention_count":null,"retention_mode":"delete","change_feed":false}`))
+		assert.False(t, c.Plan.Store.ChangeFeed)
+		r := runScenario(ctx, c, "memory", b)
+		assert.Equal(t, StatusSuccess, r.Status, r.Reason)
+	})
+
+	t.Run("a change_feed that is not a boolean is a load error", func(t *testing.T) {
+		_, err := parseStoreConfig(map[string]any{"retention_mode": "delete", "change_feed": "true"})
+		assert.Error(t, err)
+	})
+
+	t.Run("without a backend the scenario stays unverified", func(t *testing.T) {
+		c := mkCase(t, withStore(`{"retention_count":null,"retention_mode":"delete","change_feed":true}`))
+		r := runScenario(ctx, c, "memory", nil)
+		assert.Equal(t, StatusUnverified, r.Status, r.Reason)
+	})
+}

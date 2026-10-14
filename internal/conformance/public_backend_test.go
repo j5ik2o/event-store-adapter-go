@@ -405,6 +405,7 @@ func (b *publicBackend) Observe(ctx context.Context, operation int, step conform
 			return nil, err
 		}
 		out["requests"] = requests
+		out["request_scope"] = dynamodbtest.RequestScope(b.recorder.Requests(operation))
 		counts := map[string]any{}
 		for _, r := range requests {
 			phase := fmt.Sprint(r["phase"])

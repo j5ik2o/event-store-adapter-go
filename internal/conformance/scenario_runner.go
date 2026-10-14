@@ -18,6 +18,7 @@ import (
 const (
 	reasonNoBackend     = "保存先の境界が未接続のため、場面を実行していない（設計 7.2 の4番以降）"
 	reasonNotInjectable = "保存先が差し込めない障害を持つため、場面を検証できない（設計 5.4）"
+	reasonChangeFeed    = "Go の公開設定 API（eventstore.Option と dynamodb.Config）に変更フィードを求める項目がないため、change_feed = true を表現できない"
 	reasonMemoryTTL     = "TTL 方式を要求する場面は DynamoDB だけで、メモリでは対象外（設計 5.2 の1）"
 )
 
@@ -35,6 +36,8 @@ func runScenario(ctx context.Context, c ScenarioCase, backend string, b Backend)
 		return set(StatusNotApplicable, reasonMemoryTTL)
 	case b == nil:
 		return set(StatusUnverified, reasonNoBackend)
+	case plan.Store.ChangeFeed:
+		return set(StatusUnrepresentable, reasonChangeFeed)
 	}
 	for _, f := range plan.Faults {
 		if !b.Injectable(f) {
