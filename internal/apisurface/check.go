@@ -170,6 +170,19 @@ func (c *checker) typeParamNames(surfaceParams []string, path string) ([]string,
 	return out, true
 }
 
+// narrowedTypeParams returns the type parameters whose constraint is not any.
+// The surface's P and A are caller-chosen types (T-6), so the API must accept every type.
+func narrowedTypeParams(list *types.TypeParamList) []string {
+	var out []string
+	for i := 0; i < list.Len(); i++ {
+		tp := list.At(i)
+		if iface, ok := tp.Constraint().Underlying().(*types.Interface); !ok || !iface.Empty() {
+			out = append(out, tp.Obj().Name()+" "+tp.Constraint().String())
+		}
+	}
+	return out
+}
+
 func namedTypeParams(n *types.Named) []string {
 	var out []string
 	for i := 0; i < n.TypeParams().Len(); i++ {
@@ -224,6 +237,9 @@ func (c *checker) checkTypes() {
 		wantParams, ok := c.typeParamNames(st.TypeParameters, st.Name)
 		if ok && !slices.Equal(namedTypeParams(named), wantParams) {
 			c.report(st.Name, "%s has type parameters %v, want %v", tm.Name, namedTypeParams(named), wantParams)
+		}
+		if narrowed := narrowedTypeParams(named.TypeParams()); len(narrowed) > 0 {
+			c.report(st.Name, "%s constrains type parameters %v, want any (caller-chosen types, T-6)", tm.Name, narrowed)
 		}
 		for _, el := range st.Elements {
 			c.checkElement(st, tm, named, el)
@@ -442,6 +458,9 @@ func (c *checker) checkStore() {
 	wantParams, ok := c.typeParamNames(c.s.Store.TypeParameters, path)
 	if ok && !slices.Equal(namedTypeParams(named), wantParams) {
 		c.report(path, "%s has type parameters %v, want %v", sm.Name, namedTypeParams(named), wantParams)
+	}
+	if narrowed := narrowedTypeParams(named.TypeParams()); len(narrowed) > 0 {
+		c.report(path, "%s constrains type parameters %v, want any (caller-chosen types, T-6)", sm.Name, narrowed)
 	}
 	for _, op := range c.s.Store.Operations {
 		opPath := "store." + op.Name

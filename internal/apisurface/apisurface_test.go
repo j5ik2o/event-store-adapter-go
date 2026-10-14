@@ -83,3 +83,15 @@ func TestMappingGapsAreReported(t *testing.T) {
 	require.Contains(t, got, "store.persist_event: go.json has no mapping for operation persist_event")
 	require.Contains(t, got, "error_categories.storage: go.json has no mapping for error category storage")
 }
+
+func TestNarrowedTypeParametersAreReported(t *testing.T) {
+	s, err := LoadSurface(surfacePath)
+	require.NoError(t, err)
+	m, err := LoadMapping(mappingPath)
+	require.NoError(t, err)
+	pkg, err := NewLoader().Load(filepath.Join("testdata", "narrowed_type_parameter"))
+	require.NoError(t, err)
+	got := lines(Check(pkg, s, m))
+	require.Contains(t, got, "event_envelope: EventEnvelope constrains type parameters [E comparable], want any")
+	require.Contains(t, got, "store: EventStore constrains type parameters [E comparable], want any")
+}
