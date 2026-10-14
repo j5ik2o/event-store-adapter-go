@@ -223,6 +223,11 @@ func checkRequestScope(expected, actual any, aid AggregateIDArg) string {
 	if !ok {
 		return "request_scope observation is missing"
 	}
+	// Every operation sends at least one DynamoDB request. None means the recorder or the
+	// operation numbering is broken, so the scope must not pass vacuously.
+	if len(requests) == 0 {
+		return "request_scope: no requests were recorded"
+	}
 	apis, _ := want["apis"].([]any)
 	allowed := aid.TypeName + "-" + aid.Value
 	for _, raw := range requests {

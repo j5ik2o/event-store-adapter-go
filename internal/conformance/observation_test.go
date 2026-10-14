@@ -162,7 +162,7 @@ func TestRequestScopeComparison(t *testing.T) {
 		success      bool
 	}{
 		{"every request stays in the aggregate", `{"request_scope":[{"api":"Query","aids":["Order-9"]},{"api":"TransactWriteItems","aids":["Order-9","Order-9"]}]}`, true},
-		{"no requests is vacuously in scope", `{"request_scope":[]}`, true},
+		{"an operation without any recorded request is rejected", `{"request_scope":[]}`, false},
 		{"a forbidden api is rejected", `{"request_scope":[{"api":"Scan","aids":["Order-9"]}]}`, false},
 		{"another aggregate aid is rejected", `{"request_scope":[{"api":"Query","aids":["Order-9"]},{"api":"BatchGetItem","aids":["Order-9","Customer-5"]}]}`, false},
 		{"a request without an aid is rejected", `{"request_scope":[{"api":"Query","aids":[]}]}`, false},
