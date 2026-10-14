@@ -131,8 +131,8 @@ func TestConformanceSetupFailureReport(t *testing.T) {
 			require.Equal(t, 1, starts)
 			require.Contains(t, report.Errors, "setup: "+cause.Error())
 			require.True(t, report.Manifest.Verified)
-			require.Len(t, report.Required.Lists["memory"], 60)
-			require.Len(t, report.Required.Lists["dynamodb"], 104)
+			require.Len(t, report.Required.Lists["memory"], 62)
+			require.Len(t, report.Required.Lists["dynamodb"], 106)
 			require.Empty(t, report.Cases)
 			require.Equal(t, []conformance.BackendState{{Name: "memory"}, {Name: "dynamodb"}}, report.Backends)
 			require.NotEmpty(t, report.FailureReasons())
@@ -257,13 +257,20 @@ func TestPublicMemoryConformance(t *testing.T) {
 	require.NoError(t, err)
 	results := conformance.RunBackend(context.Background(), data, &publicBackend{name: "memory"})
 	success := 0
+	var unrepresentable []string
 	for _, result := range results {
 		if result.Status == conformance.StatusSuccess {
 			success++
+		}
+		if result.Status == conformance.StatusUnrepresentable {
+			unrepresentable = append(unrepresentable, result.ID)
+			require.NotEmpty(t, result.Reason, result.ID)
 		}
 		if result.Status == conformance.StatusFailure || result.Status == conformance.StatusUnverified {
 			t.Errorf("%s: %s", result.ID, result.Reason)
 		}
 	}
-	require.Equal(t, len(conformance.ApplicableCases(data, "memory")), success)
+	// The public options cannot ask for a change feed, so that case is reported with a reason.
+	require.Equal(t, []string{"memory-change-feed-unsupported"}, unrepresentable)
+	require.Equal(t, len(conformance.ApplicableCases(data, "memory")), success+len(unrepresentable))
 }

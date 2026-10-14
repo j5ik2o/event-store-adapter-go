@@ -59,7 +59,9 @@
     "seq-one-event",
     "seq-zero-event",
     "seq-negative-value",
-    "seq-above-max-value"
+    "seq-above-max-value",
+    "memory-ttl-unsupported",
+    "memory-change-feed-unsupported"
   ],
   "dynamodb": [
     "dynamodb-config-new",
@@ -165,6 +167,8 @@
     "seq-one-event",
     "seq-zero-event",
     "seq-negative-value",
-    "seq-above-max-value"
+    "seq-above-max-value",
+    "dynamodb-single-aggregate-delete",
+    "dynamodb-single-aggregate-ttl"
   ]
 }

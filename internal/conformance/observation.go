@@ -139,6 +139,8 @@ func compareObservation(ctx context.Context, operation int, step StepPlan, hooks
 					}
 				}
 			}
+		case "request_scope":
+			mismatch = checkRequestScope(expected, actual[key], step.AID)
 		case "notifications":
 			if !jsonEqual(expected, actual[key]) {
 				mismatch = "notifications differ"
@@ -208,4 +210,51 @@ func unorderedEqual(a, b any) bool {
 		return out
 	}
 	return reflect.DeepEqual(encode(x), encode(y))
+}
+
+// checkRequestScope checks every request of an operation: its API is allowed and every aid it
+// touches is the aggregate of the operation.
+func checkRequestScope(expected, actual any, aid AggregateIDArg) string {
+	want, _ := expected.(map[string]any)
+	if want["aid"] != "aggregate_id" {
+		return "unsupported request_scope.aid"
+	}
+	requests, ok := actual.([]any)
+	if !ok {
+		return "request_scope observation is missing"
+	}
+	// Every operation sends at least one DynamoDB request. None means the recorder or the
+	// operation numbering is broken, so the scope must not pass vacuously.
+	if len(requests) == 0 {
+		return "request_scope: no requests were recorded"
+	}
+	apis, _ := want["apis"].([]any)
+	allowed := aid.TypeName + "-" + aid.Value
+	for _, raw := range requests {
+		request, _ := raw.(map[string]any)
+		api, _ := request["api"].(string)
+		if !contains(anyStrings(apis), api) {
+			return fmt.Sprintf("request_scope: API %q is not allowed", api)
+		}
+		aids, _ := request["aids"].([]any)
+		if len(aids) == 0 {
+			return fmt.Sprintf("request_scope: %s request has no aid", api)
+		}
+		for _, a := range aids {
+			if a != allowed {
+				return fmt.Sprintf("request_scope: %s request touches aid %v, want %s", api, a, allowed)
+			}
+		}
+	}
+	return ""
+}
+
+func anyStrings(values []any) []string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		if s, ok := v.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }

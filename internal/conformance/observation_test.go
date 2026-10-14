@@ -149,3 +149,31 @@ func TestScenarioInputFixtureAccess(t *testing.T) {
 	require.Zero(t, OperationNumber(t.Context()))
 	require.Equal(t, 7, OperationNumber(context.WithValue(t.Context(), operationContextKey{}, 7)))
 }
+
+func TestRequestScopeComparison(t *testing.T) {
+	expected := `{"request_scope":{"apis":["GetItem","BatchGetItem","Query","TransactWriteItems","BatchWriteItem","UpdateItem"],"aid":"aggregate_id"}}`
+	parse := func(raw string) map[string]any {
+		value, err := decodeStrictJSON([]byte(raw))
+		require.NoError(t, err)
+		return value.(map[string]any)
+	}
+	for _, tc := range []struct {
+		name, actual string
+		success      bool
+	}{
+		{"every request stays in the aggregate", `{"request_scope":[{"api":"Query","aids":["Order-9"]},{"api":"TransactWriteItems","aids":["Order-9","Order-9"]}]}`, true},
+		{"an operation without any recorded request is rejected", `{"request_scope":[]}`, false},
+		{"a forbidden api is rejected", `{"request_scope":[{"api":"Scan","aids":["Order-9"]}]}`, false},
+		{"another aggregate aid is rejected", `{"request_scope":[{"api":"Query","aids":["Order-9"]},{"api":"BatchGetItem","aids":["Order-9","Customer-5"]}]}`, false},
+		{"a request without an aid is rejected", `{"request_scope":[{"api":"Query","aids":[]}]}`, false},
+		{"a missing observation is rejected", `{}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := &observedBackend{fakeBackend: &fakeBackend{}, actual: parse(tc.actual)}
+			result := CaseResult{Operations: []OperationResult{{Number: 1}}}
+			plan := StepPlan{AID: AggregateIDArg{TypeName: "Order", Value: "9"}, Observe: parse(expected)}
+			message := compareObservation(context.Background(), 1, plan, testhook.New(), nil, b, &result)
+			require.Equal(t, tc.success, message == "", message)
+		})
+	}
+}

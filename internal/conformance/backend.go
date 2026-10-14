@@ -61,6 +61,8 @@ type StoreConfig struct {
 	TTLGraceSeconds *int64
 	LayoutVersion   *int64
 	RetryLimit      *int64
+	// ChangeFeed asks for a change feed. An absent key means false.
+	ChangeFeed bool
 	// ClockEpochSeconds is the initial clock of the scenario, if it has one.
 	ClockEpochSeconds *int64
 }
