@@ -1,0 +1,71 @@
+{
+  "package": "eventstore",
+  "conventions": {
+    "leading_params": ["context.Context"],
+    "trailing_results": ["error"]
+  },
+  "type_parameters": { "P": "E", "A": "A" },
+  "value_types": {
+    "aggregate_id": { "input": "AggregateID", "output": "string" },
+    "seq_nr": { "input": "SeqNr", "output": "SeqNr" },
+    "timestamp": { "input": "time.Time", "output": "time.Time" },
+    "string": { "input": "string", "output": "string" }
+  },
+  "containers": { "optional": "*{T}", "list": "[]{T}" },
+  "types": {
+    "event_envelope": {
+      "name": "EventEnvelope",
+      "access": "method",
+      "elements": {
+        "aggregate_id": "AggregateID",
+        "seq_nr": "SeqNr",
+        "occurred_at": "OccurredAt",
+        "manifest": "Manifest",
+        "payload": "Payload"
+      },
+      "constructor": {
+        "name": "NewEventEnvelope",
+        "params": ["aggregate_id", "seq_nr", "occurred_at", "payload"],
+        "options": { "type": "EnvelopeOption", "elements": { "manifest": "WithManifest" } }
+      }
+    },
+    "snapshot_envelope": {
+      "name": "SnapshotEnvelope",
+      "access": "method",
+      "elements": {
+        "aggregate": "Aggregate",
+        "seq_nr": "SeqNr",
+        "manifest": "Manifest"
+      },
+      "constructor": {
+        "name": "NewSnapshotEnvelope",
+        "params": ["aggregate", "seq_nr"],
+        "options": { "type": "EnvelopeOption", "elements": { "manifest": "WithManifest" } }
+      }
+    },
+    "snapshot_read": {
+      "name": "SnapshotRead",
+      "access": "field",
+      "elements": { "snapshot": "Snapshot", "head_seq_nr": "HeadSeqNr" }
+    }
+  },
+  "store": {
+    "name": "EventStore",
+    "operations": {
+      "persist_event": "PersistEvent",
+      "persist_event_and_snapshot": "PersistEventAndSnapshot",
+      "get_latest_snapshot_by_id": "GetLatestSnapshotByID",
+      "get_events_by_id_since_seq_nr": "GetEventsByIDSinceSeqNr"
+    }
+  },
+  "error_categories": {
+    "interface": "Error",
+    "names": {
+      "optimistic_lock": "OptimisticLockError",
+      "contract_violation": "ContractViolationError",
+      "serialization": "SerializationError",
+      "configuration": "ConfigurationError",
+      "storage": "StorageError"
+    }
+  }
+}
