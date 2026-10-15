@@ -84,6 +84,7 @@ func (e *Environment) NewClient(apiOptions ...func(*middleware.Stack) error) *dy
 		Credentials:      credentials.NewStaticCredentialsProvider("dummy", "dummy", ""),
 		BaseEndpoint:     aws.String(e.endpoint),
 		RetryMaxAttempts: 1,
+		HTTPClient:       newHTTPClient(),
 		APIOptions:       apiOptions,
 	})
 }
