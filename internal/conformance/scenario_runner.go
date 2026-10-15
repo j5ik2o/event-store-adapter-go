@@ -110,7 +110,8 @@ func runScenario(ctx context.Context, c ScenarioCase, backend string, b Backend)
 			return fail(0, "seed に失敗した: "+err.Error(), nil, err.Error())
 		}
 	}
-	store, openErr := b.Open(context.WithValue(ctx, operationContextKey{}, 0), plan.Store, Injection{Faults: faults, Hooks: hooks, Plan: plan})
+	inj := Injection{Faults: faults, Hooks: hooks, Plan: plan}
+	store, openErr := b.Open(context.WithValue(ctx, operationContextKey{}, 0), plan.Store, inj)
 	if store != nil {
 		defer store.Close()
 	}
@@ -135,6 +136,14 @@ func runScenario(ctx context.Context, c ScenarioCase, backend string, b Backend)
 		return fail(0, "生成がストアもエラーも返さなかった", "success", nil)
 	}
 
+	stores := map[string]Store{primaryStore: store}
+	defer func() {
+		for name, st := range stores {
+			if name != primaryStore {
+				st.Close()
+			}
+		}
+	}()
 	for i, s := range plan.Steps {
 		n := i + 1
 		cursor.Set(n)
@@ -142,9 +151,9 @@ func runScenario(ctx context.Context, c ScenarioCase, backend string, b Backend)
 			clock.Store(*s.ClockEpochSeconds)
 			clockSet.Store(true)
 		}
-		out := execStep(context.WithValue(ctx, operationContextKey{}, n), store, plan, s)
+		out := execStep(context.WithValue(ctx, operationContextKey{}, n), b, inj, stores, plan, s)
 		res.Operations = append(res.Operations, OperationResult{Number: n, Result: out.describe()})
-		observationError := compareObservation(ctx, n, s, hooks, store, b, &res)
+		observationError := compareObservation(ctx, n, s, hooks, stores[s.Store], b, &res)
 		if msg := checkExpectation(plan, s, out); msg != "" {
 			return fail(n, msg, s.Expect, out.describe())
 		}
@@ -232,9 +241,36 @@ func toSnapshot(f snapshotFixture) (Snapshot, error) {
 
 // execStep converts the fixtures into the arguments and calls the store. A conversion that
 // fails is the failure of this operation; the runner does not validate the envelope itself.
-func execStep(ctx context.Context, st Store, plan *ScenarioPlan, s StepPlan) stepOutcome {
+func execStep(ctx context.Context, b Backend, inj Injection, stores map[string]Store, plan *ScenarioPlan, s StepPlan) stepOutcome {
 	out := stepOutcome{op: s.Op}
+	st := stores[s.Store]
 	switch s.Op {
+	case "createStore":
+		creator, ok := b.(StoreCreator)
+		if !ok {
+			out.err = fmt.Errorf("backend %s cannot create a store", b.Name())
+			return out
+		}
+		var shared Store
+		if s.Storage == "shared" {
+			shared = stores[s.SharedWith]
+		}
+		created, err := creator.CreateStore(ctx, plan.Store, inj, shared)
+		if created != nil {
+			stores[s.CreateName] = created
+		}
+		out.err = err
+	case "mutateWrittenPayload", "mutateReadPayload":
+		mutator, ok := st.(PayloadMutator)
+		if !ok {
+			out.err = fmt.Errorf("store %q cannot mutate payloads", s.Store)
+			return out
+		}
+		if s.Op == "mutateWrittenPayload" {
+			out.err = mutator.MutateWrittenPayload(s.MutateOperation, s.Pointer, s.Value)
+		} else {
+			out.err = mutator.MutateReadPayload(s.MutateOperation, s.MutateIndex, s.Pointer, s.Value)
+		}
 	case "persistEvent":
 		ev, err := toEvent(plan.Events[s.Event])
 		if err != nil {

@@ -5,6 +5,9 @@ import (
 	"math/big"
 )
 
+// primaryStore is the reserved name of the store that the scenario opens first.
+const primaryStore = "primary"
+
 // ScenarioPlan is a scenario with its structure read and its references checked.
 type ScenarioPlan struct {
 	Store    StoreConfig
@@ -35,7 +38,18 @@ type ErrorExpect struct {
 
 // StepPlan is one operation of the scenario.
 type StepPlan struct {
-	Op       string
+	Op string
+	// Store names the store that runs the step. It is primaryStore unless the data says otherwise.
+	Store string
+	// CreateName, Storage and SharedWith are the arguments of createStore.
+	CreateName, Storage, SharedWith string
+	// MutateOperation is the one-based operation that mutateWrittenPayload and mutateReadPayload refer to.
+	MutateOperation int
+	// MutateIndex is the position, in the events that the referred read returned, of the event to mutate.
+	MutateIndex int
+	// Pointer and Value are the JSON Pointer position and the new value of a payload mutation.
+	Pointer  string
+	Value    any
 	Event    string
 	Snapshot string
 	AID      AggregateIDArg
@@ -335,7 +349,27 @@ func parseStep(p *ScenarioPlan, v any) (StepPlan, error) {
 		return s, fmt.Errorf("arguments is not an object")
 	}
 	var err error
+	known := map[string]bool{primaryStore: true}
+	for _, prev := range p.Steps {
+		if prev.Op == "createStore" {
+			known[prev.CreateName] = true
+		}
+	}
+	s.Store = primaryStore
+	if name, present := m["store"]; present {
+		if s.Store, ok = name.(string); !ok || !known[s.Store] {
+			return s, fmt.Errorf("store %v is not a created store", name)
+		}
+	}
 	switch s.Op {
+	case "createStore":
+		if err := parseCreateStore(&s, args, known); err != nil {
+			return s, err
+		}
+	case "mutateWrittenPayload", "mutateReadPayload":
+		if err := parseMutation(p, &s, args); err != nil {
+			return s, err
+		}
 	case "persistEvent", "persistEventAndSnapshot":
 		s.Event, _ = args["event"].(string)
 		if _, ok := p.Events[s.Event]; !ok {
@@ -448,4 +482,66 @@ func parseFault(v any) (FaultSpec, error) {
 		return f, fmt.Errorf("unsupported repeat.mode %v", rep["mode"])
 	}
 	return f, nil
+}
+
+func parseCreateStore(s *StepPlan, args map[string]any, known map[string]bool) error {
+	s.CreateName, _ = args["name"].(string)
+	if s.CreateName == "" || known[s.CreateName] {
+		return fmt.Errorf("createStore name %q is empty, reserved or already created", s.CreateName)
+	}
+	s.Storage, _ = args["storage"].(string)
+	switch s.Storage {
+	case "new":
+		if _, present := args["shared_with"]; present {
+			return fmt.Errorf("createStore with storage new must not have shared_with")
+		}
+	case "shared":
+		s.SharedWith, _ = args["shared_with"].(string)
+		if !known[s.SharedWith] {
+			return fmt.Errorf("createStore shared_with %q is not a created store", s.SharedWith)
+		}
+	default:
+		return fmt.Errorf("createStore storage %q is not new or shared", s.Storage)
+	}
+	return nil
+}
+
+// parseMutation reads a payload mutation. The referred step is checked here, and so is the
+// pointer against the payload that the mutation will find at that position.
+func parseMutation(p *ScenarioPlan, s *StepPlan, args map[string]any) error {
+	op, err := bigIntFromJSONNumber(args["operation"])
+	if err != nil || !op.IsInt64() || op.Int64() < 1 || op.Int64() > int64(len(p.Steps)) {
+		return fmt.Errorf("operation must refer to an earlier step")
+	}
+	s.MutateOperation = int(op.Int64())
+	ref := p.Steps[s.MutateOperation-1]
+	s.Store = ref.Store
+	s.Pointer, _ = args["pointer"].(string)
+	s.Value = args["value"]
+	var target string
+	switch s.Op {
+	case "mutateWrittenPayload":
+		if (ref.Op != "persistEvent" && ref.Op != "persistEventAndSnapshot") || ref.Expect.Kind != "success" {
+			return fmt.Errorf("operation %d is not a successful persist", s.MutateOperation)
+		}
+		target = ref.Event
+	case "mutateReadPayload":
+		if ref.Op != "getEventsByIdSinceSeqNr" || ref.Expect.Kind != "events" {
+			return fmt.Errorf("operation %d is not a read that returned events", s.MutateOperation)
+		}
+		event, _ := args["event"].(string)
+		s.MutateIndex = -1
+		for i, name := range ref.Expect.Events {
+			if name == event {
+				s.MutateIndex = i
+				break
+			}
+		}
+		if s.MutateIndex < 0 {
+			return fmt.Errorf("event %q is not returned by operation %d", event, s.MutateOperation)
+		}
+		target = event
+	}
+	// Trial run on a copy: the pointer must exist and the value must differ from the current one.
+	return ReplaceAtPointer(deepCopy(p.Events[target].Payload), s.Pointer, s.Value)
 }

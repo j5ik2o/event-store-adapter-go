@@ -61,7 +61,11 @@
     "seq-negative-value",
     "seq-above-max-value",
     "memory-ttl-unsupported",
-    "memory-change-feed-unsupported"
+    "memory-change-feed-unsupported",
+    "memory-store-new-independent",
+    "memory-store-shared",
+    "memory-payload-written-mutation",
+    "memory-payload-read-mutation"
   ],
   "dynamodb": [
     "dynamodb-config-new",

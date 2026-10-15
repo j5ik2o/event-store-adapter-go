@@ -26,7 +26,7 @@ func reportResults() []CaseResult {
 
 func TestReport(t *testing.T) {
 	results := reportResults()
-	m := ManifestResult{Version: "1.1.0", Verified: true, FileCount: 22}
+	m := ManifestResult{Version: "1.2.0", Verified: true, FileCount: 22}
 	gate := GateResult{Lists: RequiredList{"memory": {}, "dynamodb": {}}}
 	rep := BuildReport(m, results, nil, gate, nil)
 
