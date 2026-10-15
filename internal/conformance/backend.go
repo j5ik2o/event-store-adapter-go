@@ -28,6 +28,21 @@ type ScenarioOwner interface {
 	Prepare(context.Context, *ScenarioPlan) (Backend, func() error, error)
 }
 
+// StoreCreator is implemented by a backend that can create a second store in the middle of a
+// scenario. shared is the store to share records with, or nil for a new, independent store.
+type StoreCreator interface {
+	CreateStore(ctx context.Context, cfg StoreConfig, inj Injection, shared Store) (Store, error)
+}
+
+// PayloadMutator is implemented by a store that keeps the payload objects it was given and the ones
+// it returned, by operation number, so that the runner can mutate them in place.
+type PayloadMutator interface {
+	// MutateWrittenPayload mutates the payload that the given operation passed to the library.
+	MutateWrittenPayload(operation int, pointer string, value any) error
+	// MutateReadPayload mutates the index-th payload that the given read operation got back.
+	MutateReadPayload(operation, index int, pointer string, value any) error
+}
+
 // ObservationReader collects actual observations after an operation, including
 // construction failures. Expected item values are used only to select read keys.
 type ObservationReader interface {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"sync"
@@ -121,14 +122,14 @@ func (b *publicBackend) Open(ctx context.Context, cfg conformance.StoreConfig, i
 	if err != nil {
 		return nil, conformance.ClassifyError(err)
 	}
-	events := &hookSerializer{hooks: hooks, serialize: testhook.PhaseSerializeEvent, deserialize: testhook.PhaseDeserializeEvent}
+	events := &payloadTreeSerializer{raw: &hookSerializer{hooks: hooks, serialize: testhook.PhaseSerializeEvent, deserialize: testhook.PhaseDeserializeEvent}}
 	snapshots := &hookSerializer{hooks: hooks, serialize: testhook.PhaseSerializeSnapshot, deserialize: testhook.PhaseDeserializeSnapshot}
-	var store eventstore.EventStore[json.RawMessage, json.RawMessage]
+	var store eventstore.EventStore[any, json.RawMessage]
+	var state *memory.Store
 	if b.name == "memory" {
-		var state *memory.Store
 		state, err = memory.NewStore(opts...)
 		if err == nil {
-			store, err = memory.New(state, events, snapshots)
+			store, err = memory.New[any, json.RawMessage](state, events, snapshots)
 		}
 	} else {
 		b.recorder = dynamodbtest.NewRecorder()
@@ -144,8 +145,41 @@ func (b *publicBackend) Open(ctx context.Context, cfg conformance.StoreConfig, i
 	if err != nil {
 		return nil, conformance.ClassifyError(err)
 	}
-	b.store = &publicStore{actual: store, backend: b, hooks: hooks}
+	b.store = &publicStore{actual: store, state: state, backend: b, hooks: hooks, written: map[int]any{}, read: map[int][]any{}}
 	return b.store, nil
+}
+
+// CreateStore creates a second memory store in the middle of a scenario. A new store has its own
+// records. A shared store is connected to the Store of the store it shares with through the public
+// memory.New, so that both use the same records and the same lock. b.store stays the first store.
+func (b *publicBackend) CreateStore(ctx context.Context, cfg conformance.StoreConfig, injection conformance.Injection, shared conformance.Store) (conformance.Store, error) {
+	if b.name != "memory" {
+		return nil, fmt.Errorf("createStore is only defined for the memory backend")
+	}
+	hooks := injection.Hooks
+	var state *memory.Store
+	if shared != nil {
+		other, ok := shared.(*publicStore)
+		if !ok || other.state == nil {
+			return nil, fmt.Errorf("shared store is not a memory store")
+		}
+		state = other.state
+	} else {
+		opts, err := b.options(cfg, nil)
+		if err != nil {
+			return nil, conformance.ClassifyError(err)
+		}
+		if state, err = memory.NewStore(opts...); err != nil {
+			return nil, conformance.ClassifyError(err)
+		}
+	}
+	events := &payloadTreeSerializer{raw: &hookSerializer{hooks: hooks, serialize: testhook.PhaseSerializeEvent, deserialize: testhook.PhaseDeserializeEvent}}
+	snapshots := &hookSerializer{hooks: hooks, serialize: testhook.PhaseSerializeSnapshot, deserialize: testhook.PhaseDeserializeSnapshot}
+	store, err := memory.New[any, json.RawMessage](state, events, snapshots)
+	if err != nil {
+		return nil, conformance.ClassifyError(err)
+	}
+	return &publicStore{actual: store, state: state, backend: b, hooks: hooks, written: map[int]any{}, read: map[int][]any{}}, nil
 }
 
 type hookSerializer struct {
@@ -166,19 +200,68 @@ func (s *hookSerializer) Deserialize(value []byte) (json.RawMessage, error) {
 	return eventstore.NewJSONSerializer[json.RawMessage]().Deserialize(value)
 }
 
+// payloadTreeSerializer serializes an event payload given as a decoded JSON tree (numbers are
+// json.Number, so no precision is lost) through the same fault hooks as hookSerializer.
+type payloadTreeSerializer struct{ raw *hookSerializer }
+
+func (s *payloadTreeSerializer) Serialize(value any) ([]byte, error) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, &eventstore.SerializationError{Cause: err}
+	}
+	return s.raw.Serialize(json.RawMessage(encoded))
+}
+
+func (s *payloadTreeSerializer) Deserialize(value []byte) (any, error) {
+	decoded, err := s.raw.Deserialize(value)
+	if err != nil {
+		return nil, err
+	}
+	tree, err := decodePayloadTree(decoded)
+	if err != nil {
+		return nil, &eventstore.SerializationError{Cause: err}
+	}
+	return tree, nil
+}
+
+func decodePayloadTree(data []byte) (any, error) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	var tree any
+	if err := decoder.Decode(&tree); err != nil {
+		return nil, err
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return nil, fmt.Errorf("trailing data after the payload")
+	}
+	return tree, nil
+}
+
 type fixtureID struct{ parts conformance.AggregateIDArg }
 
 func (id fixtureID) TypeName() string { return id.parts.TypeName }
 func (id fixtureID) Value() string    { return id.parts.Value }
 
 type publicStore struct {
-	actual  eventstore.EventStore[json.RawMessage, json.RawMessage]
+	actual  eventstore.EventStore[any, json.RawMessage]
+	state   *memory.Store
 	backend *publicBackend
 	hooks   *testhook.Hooks
+	mu      sync.Mutex
+	// written is the payload tree that each operation passed to the library, and read is the trees
+	// that each read operation got back. They are the objects the payload mutations change.
+	written map[int]any
+	read    map[int][]any
 }
 
-func publicEvent(ev conformance.Event) (eventstore.EventEnvelope[json.RawMessage], error) {
-	return eventstore.NewEventEnvelope(fixtureID{parts: ev.AggregateID}, eventstore.SeqNr(ev.SeqNr), ev.OccurredAt, json.RawMessage(ev.Payload), eventstore.WithManifest(ev.Manifest))
+// publicEvent returns the event for the library and the payload tree inside it.
+func publicEvent(ev conformance.Event) (eventstore.EventEnvelope[any], any, error) {
+	tree, err := decodePayloadTree(ev.Payload)
+	if err != nil {
+		return eventstore.EventEnvelope[any]{}, nil, err
+	}
+	event, err := eventstore.NewEventEnvelope[any](fixtureID{parts: ev.AggregateID}, eventstore.SeqNr(ev.SeqNr), ev.OccurredAt, tree, eventstore.WithManifest(ev.Manifest))
+	return event, tree, err
 }
 func publicSnapshot(sn conformance.Snapshot) (eventstore.SnapshotEnvelope[json.RawMessage], error) {
 	return eventstore.NewSnapshotEnvelope(json.RawMessage(sn.Aggregate), eventstore.SeqNr(sn.SeqNr), eventstore.WithManifest(sn.Manifest))
@@ -191,20 +274,22 @@ func (s *publicStore) context(ctx context.Context) context.Context {
 }
 func (s *publicStore) PersistEvent(ctx context.Context, ev conformance.Event) error {
 	ctx = s.context(ctx)
-	event, err := publicEvent(ev)
+	event, tree, err := publicEvent(ev)
 	if err == nil {
+		s.recordWritten(ctx, tree)
 		err = s.actual.PersistEvent(ctx, event)
 	}
 	return conformance.ClassifyError(err)
 }
 func (s *publicStore) PersistEventAndSnapshot(ctx context.Context, ev conformance.Event, sn conformance.Snapshot) error {
 	ctx = s.context(ctx)
-	event, err := publicEvent(ev)
+	event, tree, err := publicEvent(ev)
 	if err != nil {
 		return conformance.ClassifyError(err)
 	}
 	snapshot, err := publicSnapshot(sn)
 	if err == nil {
+		s.recordWritten(ctx, tree)
 		err = s.actual.PersistEventAndSnapshot(ctx, event, snapshot)
 	}
 	return conformance.ClassifyError(err)
@@ -222,20 +307,60 @@ func (s *publicStore) GetLatestSnapshotByID(ctx context.Context, aid conformance
 	return out, nil
 }
 func (s *publicStore) GetEventsByIDSinceSeqNr(ctx context.Context, aid conformance.AggregateIDArg, since int64) ([]conformance.Event, error) {
-	events, err := s.actual.GetEventsByIDSinceSeqNr(s.context(ctx), fixtureID{parts: aid}, eventstore.SeqNr(since))
+	ctx = s.context(ctx)
+	events, err := s.actual.GetEventsByIDSinceSeqNr(ctx, fixtureID{parts: aid}, eventstore.SeqNr(since))
 	if err != nil {
 		return nil, conformance.ClassifyError(err)
 	}
 	out := []conformance.Event{}
+	trees := []any{}
 	for _, ev := range events {
 		typeName, value, found := strings.Cut(ev.AggregateID(), "-")
 		if !found {
 			return nil, fmt.Errorf("returned aid has no delimiter")
 		}
-		out = append(out, conformance.Event{AggregateID: conformance.AggregateIDArg{TypeName: typeName, Value: value}, SeqNr: int64(ev.SeqNr()), OccurredAt: ev.OccurredAt(), Manifest: ev.Manifest(), Payload: bytes.Clone(ev.Payload())})
+		// The payload tree is recorded as the library returned it, without a copy.
+		tree := ev.Payload()
+		payload, err := json.Marshal(tree)
+		if err != nil {
+			return nil, err
+		}
+		trees = append(trees, tree)
+		out = append(out, conformance.Event{AggregateID: conformance.AggregateIDArg{TypeName: typeName, Value: value}, SeqNr: int64(ev.SeqNr()), OccurredAt: ev.OccurredAt(), Manifest: ev.Manifest(), Payload: payload})
 	}
+	s.mu.Lock()
+	s.read[conformance.OperationNumber(ctx)] = trees
+	s.mu.Unlock()
 	return out, nil
 }
+func (s *publicStore) recordWritten(ctx context.Context, tree any) {
+	s.mu.Lock()
+	s.written[conformance.OperationNumber(ctx)] = tree
+	s.mu.Unlock()
+}
+
+// MutateWrittenPayload changes the payload object that the operation passed to the library.
+func (s *publicStore) MutateWrittenPayload(operation int, pointer string, value any) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tree, ok := s.written[operation]
+	if !ok {
+		return fmt.Errorf("operation %d wrote no payload", operation)
+	}
+	return conformance.ReplaceAtPointer(tree, pointer, value)
+}
+
+// MutateReadPayload changes the payload object that the read operation got back from the library.
+func (s *publicStore) MutateReadPayload(operation, index int, pointer string, value any) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	trees := s.read[operation]
+	if index < 0 || index >= len(trees) {
+		return fmt.Errorf("operation %d read no payload at %d", operation, index)
+	}
+	return conformance.ReplaceAtPointer(trees[index], pointer, value)
+}
+
 func (s *publicStore) Notifications() []string {
 	s.backend.mu.Lock()
 	defer s.backend.mu.Unlock()
@@ -281,11 +406,11 @@ func (b *publicBackend) connectReadPlans(cfg conformance.StoreConfig, injection 
 			}
 			otherRequests := dynamodbtest.NewRecorder()
 			otherResponses := &dynamodbtest.ResponseRecorder{}
-			other, err := dynamodb.New(ctx, b.environment.NewClient(otherRequests.APIOption, otherResponses.APIOption), b.config(cfg), eventstore.NewJSONSerializer[json.RawMessage](), eventstore.NewJSONSerializer[json.RawMessage](), opts...)
+			other, err := dynamodb.New(ctx, b.environment.NewClient(otherRequests.APIOption, otherResponses.APIOption), b.config(cfg), &payloadTreeSerializer{raw: &hookSerializer{hooks: testhook.New(), serialize: testhook.PhaseSerializeEvent, deserialize: testhook.PhaseDeserializeEvent}}, eventstore.NewJSONSerializer[json.RawMessage](), opts...)
 			if err != nil {
 				return err
 			}
-			event, err := publicEvent(ev)
+			event, _, err := publicEvent(ev)
 			if err != nil {
 				return err
 			}

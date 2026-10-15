@@ -11,10 +11,10 @@ import (
 )
 
 func TestLoadData(t *testing.T) {
-	t.Run("reads the real data: 120 cases, 30 value cases", func(t *testing.T) {
+	t.Run("reads the real data: 124 cases, 30 value cases", func(t *testing.T) {
 		d, err := LoadData(dataRoot())
 		require.NoError(t, err)
-		assert.Equal(t, 120, len(d.Values)+len(d.Scenarios)+len(d.Layouts))
+		assert.Equal(t, 124, len(d.Values)+len(d.Scenarios)+len(d.Layouts))
 		assert.Len(t, d.Values, 30)
 	})
 
@@ -43,14 +43,14 @@ func TestLoadData(t *testing.T) {
 
 	t.Run("wrong version is rejected", func(t *testing.T) {
 		root := copyTree(t)
-		replaceInFile(t, filepath.Join(root, "values", "hash.json"), `"version": "1.1.0"`, `"version": "2.0.0"`)
+		replaceInFile(t, filepath.Join(root, "values", "hash.json"), `"version": "1.2.0"`, `"version": "2.0.0"`)
 		_, err := LoadData(root)
 		assert.Error(t, err)
 	})
 
 	t.Run("json file without a known format mapping is rejected", func(t *testing.T) {
 		root := copyTree(t)
-		require.NoError(t, os.WriteFile(filepath.Join(root, "extra.json"), []byte(`{"format":"values","version":"1.1.0"}`), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "extra.json"), []byte(`{"format":"values","version":"1.2.0"}`), 0o644))
 		_, err := LoadData(root)
 		assert.Error(t, err)
 	})
@@ -96,7 +96,7 @@ func TestLoadData_DuplicateID(t *testing.T) {
 	t.Run("real data has unique ids", func(t *testing.T) {
 		d, err := LoadData(dataRoot())
 		require.NoError(t, err)
-		assert.Equal(t, 120, len(d.Values)+len(d.Scenarios)+len(d.Layouts))
+		assert.Equal(t, 124, len(d.Values)+len(d.Scenarios)+len(d.Layouts))
 	})
 
 	t.Run("duplicate id across files is rejected and named", func(t *testing.T) {

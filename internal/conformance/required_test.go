@@ -16,7 +16,7 @@ func TestLoadRequired(t *testing.T) {
 		d, err := LoadData(dataRoot())
 		require.NoError(t, err)
 		assert.Len(t, req, 2)
-		assert.Len(t, req["memory"], 62)
+		assert.Len(t, req["memory"], 66)
 		assert.Len(t, req["dynamodb"], 106)
 		require.NoError(t, CheckRequiredCoverage(d, req))
 		deleteOne := RequiredList{"memory": req["memory"][1:], "dynamodb": req["dynamodb"]}

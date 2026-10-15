@@ -149,3 +149,35 @@ func child(container any, tok string) (any, error) {
 	}
 	return nil, fmt.Errorf("cannot descend into %T at %q", container, tok)
 }
+
+// ReplaceAtPointer replaces, in place, the value that the JSON Pointer names in root with a copy
+// of value. The pointer must name an existing position, and the new value must differ from the
+// current one. When it returns an error, root is unchanged.
+func ReplaceAtPointer(root any, pointer string, value any) error {
+	tokens, err := decodePointer(pointer)
+	if err != nil {
+		return err
+	}
+	cur := root
+	for _, tok := range tokens[:len(tokens)-1] {
+		if cur, err = child(cur, tok); err != nil {
+			return err
+		}
+	}
+	last := tokens[len(tokens)-1]
+	existing, err := child(cur, last)
+	if err != nil {
+		return err
+	}
+	if jsonEqual(existing, value) {
+		return fmt.Errorf("value equals the current value at %q", pointer)
+	}
+	switch t := cur.(type) {
+	case map[string]any:
+		t[last] = deepCopy(value)
+	case []any:
+		idx, _ := strconv.Atoi(last)
+		t[idx] = deepCopy(value)
+	}
+	return nil
+}
