@@ -98,3 +98,26 @@ func TestHookSerializerPreservesPayloadAndFailureCause(t *testing.T) {
 	_, err = serializer.Deserialize(encoded)
 	require.ErrorIs(t, err, cause)
 }
+
+func TestPayloadTreeSerializer(t *testing.T) {
+	hooks := testhook.New()
+	serializer := &payloadTreeSerializer{raw: &hookSerializer{hooks: hooks, serialize: testhook.PhaseSerializeEvent, deserialize: testhook.PhaseDeserializeEvent}}
+	payload := []byte(`{"label":"日本語","number":9007199254740993}`)
+	tree, err := decodePayloadTree(payload)
+	require.NoError(t, err)
+	encoded, err := serializer.Serialize(tree)
+	require.NoError(t, err)
+	decoded, err := serializer.Deserialize(encoded)
+	require.NoError(t, err)
+	back, err := json.Marshal(decoded)
+	require.NoError(t, err)
+	require.Equal(t, string(payload), string(back))
+
+	cause := errors.New("declared serializer fault")
+	hooks.OnFail(testhook.PhaseSerializeEvent, func(testhook.Point) error { return cause })
+	_, err = serializer.Serialize(tree)
+	require.ErrorIs(t, err, cause)
+	hooks.OnFail(testhook.PhaseDeserializeEvent, func(testhook.Point) error { return cause })
+	_, err = serializer.Deserialize(encoded)
+	require.ErrorIs(t, err, cause)
+}

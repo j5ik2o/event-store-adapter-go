@@ -11,7 +11,7 @@ import (
 )
 
 // DataVersion is the only supported version of the conformance data.
-const DataVersion = "1.1.0"
+const DataVersion = "1.2.0"
 
 // ValueInput is the input of a value-table case. Integers are kept without loss of precision.
 type ValueInput struct {
