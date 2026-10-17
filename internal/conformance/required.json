@@ -64,6 +64,7 @@
     "memory-change-feed-unsupported",
     "memory-store-new-independent",
     "memory-store-shared",
+    "memory-store-shared-configuration",
     "memory-payload-written-mutation",
     "memory-payload-read-mutation"
   ],
