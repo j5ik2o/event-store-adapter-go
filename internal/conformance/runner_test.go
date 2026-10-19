@@ -131,7 +131,7 @@ func TestConformanceSetupFailureReport(t *testing.T) {
 			require.Equal(t, 1, starts)
 			require.Contains(t, report.Errors, "setup: "+cause.Error())
 			require.True(t, report.Manifest.Verified)
-			require.Len(t, report.Required.Lists["memory"], 66)
+			require.Len(t, report.Required.Lists["memory"], 67)
 			require.Len(t, report.Required.Lists["dynamodb"], 106)
 			require.Empty(t, report.Cases)
 			require.Equal(t, []conformance.BackendState{{Name: "memory"}, {Name: "dynamodb"}}, report.Backends)

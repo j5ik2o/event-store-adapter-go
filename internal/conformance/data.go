@@ -11,7 +11,7 @@ import (
 )
 
 // DataVersion is the only supported version of the conformance data.
-const DataVersion = "1.2.0"
+const DataVersion = "1.3.0"
 
 // ValueInput is the input of a value-table case. Integers are kept without loss of precision.
 type ValueInput struct {
@@ -30,6 +30,9 @@ type ValueCase struct {
 	Input         ValueInput
 	Expect        map[string]any
 	TimePrecision string
+	// OutOfScope is true when the case targets a storage this language does not provide.
+	// Its input is not interpreted.
+	OutOfScope bool
 }
 
 // ScenarioCase is a scenario case. Materialized is Raw with generators expanded.
@@ -44,6 +47,9 @@ type ScenarioCase struct {
 	Materialized  map[string]any
 	// Plan is Materialized read into its steps, faults and expectations.
 	Plan *ScenarioPlan
+	// OutOfScope is true when no provided backend is in Backends. The case is not
+	// interpreted, so Plan is nil.
+	OutOfScope bool
 }
 
 // LayoutCase is a case of dynamodb/layout.json.
@@ -113,6 +119,8 @@ func expectedFormat(rel string) (string, bool) {
 	case path.Dir(rel) == "dynamodb" && strings.HasSuffix(rel, ".json"):
 		return "scenarios", true
 	case path.Dir(rel) == "memory" && strings.HasSuffix(rel, ".json"):
+		return "scenarios", true
+	case (path.Dir(rel) == "sqlite" || path.Dir(rel) == "spanner" || path.Dir(rel) == "bigtable") && strings.HasSuffix(rel, ".json"):
 		return "scenarios", true
 	case strings.HasPrefix(rel, "scenarios/") && strings.HasSuffix(rel, ".json"):
 		return "scenarios", true
@@ -243,6 +251,25 @@ func loadExclusions(d *Data, rel string, obj map[string]any) error {
 	return nil
 }
 
+// providedBackends are the storages this language provides.
+var providedBackends = []string{"memory", "dynamodb"}
+
+// unprovidedValueOperations are the value operations of storages this language does not provide.
+var unprovidedValueOperations = map[string]string{
+	"encodeBigtableEventEnvelope":    "bigtable",
+	"encodeBigtableSnapshotEnvelope": "bigtable",
+	"decodeBigtableEnvelope":         "bigtable",
+}
+
+func targetsProvidedBackend(backends []string) bool {
+	for _, b := range providedBackends {
+		if contains(backends, b) {
+			return true
+		}
+	}
+	return false
+}
+
 func loadCases(d *Data, rel, format string, obj map[string]any, ids map[string]string) error {
 	list, ok := obj["cases"].([]any)
 	if !ok {
@@ -265,12 +292,21 @@ func loadCases(d *Data, rel, format string, obj map[string]any, ids map[string]s
 		if err != nil {
 			return fmt.Errorf("%s: case %q: rules: %w", rel, id, err)
 		}
-		precision, err := timePrecision(c)
-		if err != nil {
-			return fmt.Errorf("%s: case %q: %w", rel, id, err)
-		}
 		switch format {
 		case "values":
+			if op, _ := c["operation"].(string); unprovidedValueOperations[op] != "" {
+				in, _ := c["input"].(map[string]any)
+				expect, _ := c["expect"].(map[string]any)
+				d.Values = append(d.Values, ValueCase{
+					ID: id, File: rel, Rules: rules, Operation: op,
+					Input: ValueInput{Raw: in}, Expect: expect, OutOfScope: true,
+				})
+				continue
+			}
+			precision, err := timePrecision(c)
+			if err != nil {
+				return fmt.Errorf("%s: case %q: %w", rel, id, err)
+			}
 			vc, err := newValueCase(rel, id, rules, precision, c)
 			if err != nil {
 				return fmt.Errorf("%s: case %q: %w", rel, id, err)
@@ -280,6 +316,16 @@ func loadCases(d *Data, rel, format string, obj map[string]any, ids map[string]s
 			backends, err := stringList(c["backends"])
 			if err != nil {
 				return fmt.Errorf("%s: case %q: backends: %w", rel, id, err)
+			}
+			if !targetsProvidedBackend(backends) {
+				d.Scenarios = append(d.Scenarios, ScenarioCase{
+					ID: id, File: rel, Rules: rules, Backends: backends, Raw: c, OutOfScope: true,
+				})
+				continue
+			}
+			precision, err := timePrecision(c)
+			if err != nil {
+				return fmt.Errorf("%s: case %q: %w", rel, id, err)
 			}
 			var requires []string
 			if r, present := c["requires"]; present {
@@ -300,6 +346,9 @@ func loadCases(d *Data, rel, format string, obj map[string]any, ids map[string]s
 				TimePrecision: precision, Raw: c, Materialized: mat, Plan: plan,
 			})
 		case "layout":
+			if _, err := timePrecision(c); err != nil {
+				return fmt.Errorf("%s: case %q: %w", rel, id, err)
+			}
 			d.Layouts = append(d.Layouts, LayoutCase{ID: id, File: rel, Rules: rules, Raw: c})
 		}
 	}

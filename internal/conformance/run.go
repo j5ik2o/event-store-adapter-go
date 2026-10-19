@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/j5ik2o/event-store-adapter-go/v5/internal/testhook"
@@ -24,6 +25,8 @@ func RunBackend(ctx context.Context, data *Data, backend Backend) []CaseResult {
 	for _, c := range data.Values {
 		res := CaseResult{ID: c.ID, Rules: nonNil(c.Rules), Backend: name}
 		switch {
+		case c.OutOfScope:
+			res.Status, res.Reason = StatusNotApplicable, reasonBigtableEnvelope
 		case c.Operation == "fnv1a64":
 			res.Status, res.Reason = StatusNotApplicable, reasonFnv1a64
 		case c.TimePrecision == "milliseconds":
@@ -37,7 +40,9 @@ func RunBackend(ctx context.Context, data *Data, backend Backend) []CaseResult {
 		results = append(results, res)
 	}
 	for _, c := range data.Scenarios {
-		if !contains(c.Backends, name) {
+		if c.OutOfScope {
+			results = append(results, CaseResult{ID: c.ID, Rules: nonNil(c.Rules), Backend: name, Status: StatusNotApplicable, Reason: unprovidedBackendReason(c)})
+		} else if !contains(c.Backends, name) {
 			results = append(results, CaseResult{ID: c.ID, Rules: nonNil(c.Rules), Backend: name, Status: StatusNotApplicable, Reason: fmt.Sprintf("配布 backends=%v に %s がない", c.Backends, name)})
 		} else {
 			results = append(results, runScenario(ctx, c, name, backend))
@@ -55,6 +60,10 @@ func RunBackend(ctx context.Context, data *Data, backend Backend) []CaseResult {
 		results = append(results, res)
 	}
 	return results
+}
+
+func unprovidedBackendReason(c ScenarioCase) string {
+	return fmt.Sprintf(reasonUnprovidedBackend, strings.Join(c.Backends, "・"))
 }
 
 func runTimeCase(ctx context.Context, c ValueCase, b Backend) (res CaseResult) {
@@ -142,7 +151,7 @@ func ClassifyError(err error) error { return coreOperationError(err) }
 func ApplicableCases(data *Data, backend string) []string {
 	var ids []string
 	for _, c := range data.Values {
-		if c.Operation != "fnv1a64" && c.TimePrecision != "milliseconds" {
+		if !c.OutOfScope && c.Operation != "fnv1a64" && c.TimePrecision != "milliseconds" {
 			ids = append(ids, c.ID)
 		}
 	}

@@ -30,6 +30,8 @@ func runScenario(ctx context.Context, c ScenarioCase, backend string, b Backend)
 
 	plan := c.Plan
 	switch {
+	case c.OutOfScope:
+		return set(StatusNotApplicable, unprovidedBackendReason(c))
 	case c.TimePrecision == "milliseconds":
 		return set(StatusNotApplicable, reasonMillis)
 	case backend == "memory" && contains(c.Requires, "ttl"):

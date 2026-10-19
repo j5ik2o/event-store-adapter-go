@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,19 +12,25 @@ import (
 )
 
 func TestLoadData(t *testing.T) {
-	t.Run("reads the real data: 124 cases, 30 value cases", func(t *testing.T) {
+	t.Run("reads every case and every value case of the real data", func(t *testing.T) {
 		d, err := LoadData(dataRoot())
 		require.NoError(t, err)
-		assert.Equal(t, 124, len(d.Values)+len(d.Scenarios)+len(d.Layouts))
-		assert.Len(t, d.Values, 30)
+		assert.Equal(t, 169, len(d.Values)+len(d.Scenarios)+len(d.Layouts))
+		assert.Len(t, d.Values, 40)
 	})
 
 	t.Run("operation is limited to four kinds", func(t *testing.T) {
 		d, err := LoadData(dataRoot())
 		require.NoError(t, err)
 		allowed := map[string]bool{"buildAid": true, "validateOccurredAt": true, "validateSeqNr": true, "fnv1a64": true}
+		outOfScope := map[string]bool{"encodeBigtableEventEnvelope": true, "encodeBigtableSnapshotEnvelope": true, "decodeBigtableEnvelope": true}
 		for _, v := range d.Values {
+			if outOfScope[v.Operation] {
+				assert.True(t, v.OutOfScope, v.ID)
+				continue
+			}
 			assert.True(t, allowed[v.Operation], v.ID)
+			assert.False(t, v.OutOfScope, v.ID)
 		}
 	})
 
@@ -43,14 +50,14 @@ func TestLoadData(t *testing.T) {
 
 	t.Run("wrong version is rejected", func(t *testing.T) {
 		root := copyTree(t)
-		replaceInFile(t, filepath.Join(root, "values", "hash.json"), `"version": "1.2.0"`, `"version": "2.0.0"`)
+		replaceInFile(t, filepath.Join(root, "values", "hash.json"), `"version": "1.3.0"`, `"version": "2.0.0"`)
 		_, err := LoadData(root)
 		assert.Error(t, err)
 	})
 
 	t.Run("json file without a known format mapping is rejected", func(t *testing.T) {
 		root := copyTree(t)
-		require.NoError(t, os.WriteFile(filepath.Join(root, "extra.json"), []byte(`{"format":"values","version":"1.2.0"}`), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "extra.json"), []byte(`{"format":"values","version":"1.3.0"}`), 0o644))
 		_, err := LoadData(root)
 		assert.Error(t, err)
 	})
@@ -96,7 +103,7 @@ func TestLoadData_DuplicateID(t *testing.T) {
 	t.Run("real data has unique ids", func(t *testing.T) {
 		d, err := LoadData(dataRoot())
 		require.NoError(t, err)
-		assert.Equal(t, 124, len(d.Values)+len(d.Scenarios)+len(d.Layouts))
+		assert.Equal(t, 169, len(d.Values)+len(d.Scenarios)+len(d.Layouts))
 	})
 
 	t.Run("duplicate id across files is rejected and named", func(t *testing.T) {
@@ -195,11 +202,14 @@ func TestLoadData_ValueInputShape(t *testing.T) {
 }
 
 func TestParseScenario(t *testing.T) {
-	t.Run("every real scenario has a parsed plan", func(t *testing.T) {
+	t.Run("every real scenario of a provided storage has a parsed plan", func(t *testing.T) {
 		d, err := LoadData(dataRoot())
 		require.NoError(t, err)
 		require.NotEmpty(t, d.Scenarios)
 		for _, c := range d.Scenarios {
+			if c.OutOfScope {
+				continue
+			}
 			assert.NotNil(t, c.Plan, c.ID)
 		}
 	})
@@ -216,5 +226,167 @@ func TestParseScenario(t *testing.T) {
 		replaceInFile(t, filepath.Join(root, "scenarios", "core", "retention-errors.json"), `"operation": 1,`, `"operation": 99,`)
 		_, err := LoadData(root)
 		assert.Error(t, err)
+	})
+}
+
+const outOfScopeScenario = `{"cases":[{
+  "id":"x-1","rules":["SQ-1"],"description":"d","backends":["%s"],
+  "store":{"retention_count":null,"retention_mode":"delete"},
+  %s
+  "fixtures":{"events":{},"snapshots":{}},
+  "steps":[{"op":"holdWriteLock","arguments":{"hold":"a"},"expect":{"result":"success"}}]
+}]}`
+
+func decodeObject(t *testing.T, body string) map[string]any {
+	t.Helper()
+	v, err := decodeStrictJSON([]byte(body))
+	require.NoError(t, err)
+	return v.(map[string]any)
+}
+
+func TestLoadCases_OutOfScope(t *testing.T) {
+	t.Run("a scenario that targets only SQLite is read without its steps being interpreted", func(t *testing.T) {
+		d := &Data{}
+		err := loadCases(d, "x.json", "scenarios", decodeObject(t, fmt.Sprintf(outOfScopeScenario, "sqlite", `"seed":{"events":{},"snapshots":{}},`)), map[string]string{})
+		require.NoError(t, err)
+		require.Len(t, d.Scenarios, 1)
+		assert.True(t, d.Scenarios[0].OutOfScope)
+		assert.Nil(t, d.Scenarios[0].Plan)
+		assert.Equal(t, []string{"sqlite"}, d.Scenarios[0].Backends)
+	})
+
+	t.Run("a scenario that targets memory keeps rejecting an unknown operation", func(t *testing.T) {
+		d := &Data{}
+		err := loadCases(d, "x.json", "scenarios", decodeObject(t, fmt.Sprintf(outOfScopeScenario, "memory", "")), map[string]string{})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `unsupported op "holdWriteLock"`)
+		assert.Empty(t, d.Scenarios)
+	})
+
+	t.Run("a scenario that targets dynamodb keeps rejecting an unknown operation", func(t *testing.T) {
+		d := &Data{}
+		err := loadCases(d, "x.json", "scenarios", decodeObject(t, fmt.Sprintf(outOfScopeScenario, "dynamodb", "")), map[string]string{})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `unsupported op "holdWriteLock"`)
+	})
+
+	t.Run("a value case with a Bigtable envelope operation is read without its input being checked", func(t *testing.T) {
+		d := &Data{}
+		body := `{"cases":[{"id":"v-1","rules":["BT-D6a"],"description":"d","operation":"decodeBigtableEnvelope",
+		  "input":{"kind":"event","bytes_hex":"00"},"expect":{"result":"error"}}]}`
+		err := loadCases(d, "x.json", "values", decodeObject(t, body), map[string]string{})
+		require.NoError(t, err)
+		require.Len(t, d.Values, 1)
+		assert.True(t, d.Values[0].OutOfScope)
+		assert.Equal(t, "decodeBigtableEnvelope", d.Values[0].Operation)
+	})
+
+	t.Run("a value case with an operation outside the list is still rejected", func(t *testing.T) {
+		d := &Data{}
+		body := `{"cases":[{"id":"v-1","rules":["BT-D6a"],"description":"d","operation":"decodeUnknownEnvelope",
+		  "input":{"kind":"event","bytes_hex":"00"},"expect":{"result":"error"}}]}`
+		err := loadCases(d, "x.json", "values", decodeObject(t, body), map[string]string{})
+		assert.Error(t, err)
+	})
+}
+
+func TestLoadData_OutOfScopeFiles(t *testing.T) {
+	d, err := LoadData(dataRoot())
+	require.NoError(t, err)
+
+	t.Run("the SQLite lock scenario that uses holdWriteLock is read as out of scope", func(t *testing.T) {
+		var found int
+		for _, c := range d.Scenarios {
+			if c.File == "sqlite/write-lock.json" {
+				found++
+				assert.True(t, c.OutOfScope, c.ID)
+				assert.Nil(t, c.Plan, c.ID)
+			}
+		}
+		assert.Positive(t, found)
+	})
+
+	t.Run("only the scenarios without memory and dynamodb are out of scope", func(t *testing.T) {
+		for _, c := range d.Scenarios {
+			provided := contains(c.Backends, "memory") || contains(c.Backends, "dynamodb")
+			assert.Equal(t, !provided, c.OutOfScope, c.ID)
+			assert.Equal(t, provided, c.Plan != nil, c.ID)
+		}
+	})
+
+	t.Run("the new memory case is read as a scenario in scope", func(t *testing.T) {
+		for _, c := range d.Scenarios {
+			if c.ID == "memory-store-shared-configuration" {
+				assert.False(t, c.OutOfScope)
+				assert.Equal(t, []string{"MEM-2"}, c.Rules)
+				return
+			}
+		}
+		t.Fatal("memory-store-shared-configuration is not in the data")
+	})
+
+	t.Run("every Bigtable envelope value case is out of scope", func(t *testing.T) {
+		var found int
+		for _, v := range d.Values {
+			if v.File == "values/bigtable-envelope.json" {
+				found++
+				assert.True(t, v.OutOfScope, v.ID)
+			}
+		}
+		assert.Equal(t, 10, found)
+	})
+}
+
+const storeScenario = `{"cases":[{
+  "id":"s-1","rules":["W-1"],"description":"d","backends":%s,
+  "store":%s,
+  "fixtures":{"events":{},"snapshots":{}},
+  "steps":[]
+}]}`
+
+func TestLoadCases_StoreSettings(t *testing.T) {
+	load := func(t *testing.T, backends, store string) (*Data, error) {
+		t.Helper()
+		d := &Data{}
+		err := loadCases(d, "x.json", "scenarios", decodeObject(t, fmt.Sprintf(storeScenario, backends, store)), map[string]string{})
+		return d, err
+	}
+	unread := map[string]string{
+		"lock_wait_milliseconds":  "50",
+		"transaction_retry_limit": "3",
+		"ttl_grace_days":          "7",
+		"envelope_limit_bytes":    "1024",
+	}
+
+	for key, value := range unread {
+		key, value := key, value
+		store := `{"retention_count":null,"retention_mode":"delete","` + key + `":` + value + `}`
+
+		t.Run("a scenario that targets only SQLite is read with the setting "+key, func(t *testing.T) {
+			d, err := load(t, `["sqlite"]`, store)
+			require.NoError(t, err)
+			require.Len(t, d.Scenarios, 1)
+			assert.True(t, d.Scenarios[0].OutOfScope)
+			assert.Nil(t, d.Scenarios[0].Plan)
+		})
+
+		for _, backends := range []string{`["memory"]`, `["dynamodb"]`, `["memory","dynamodb","sqlite"]`} {
+			backends := backends
+			t.Run("a scenario that targets "+backends+" rejects the setting "+key, func(t *testing.T) {
+				d, err := load(t, backends, store)
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), key)
+				assert.Empty(t, d.Scenarios)
+			})
+		}
+	}
+
+	t.Run("a scenario that targets memory is read with the settings the runner interprets", func(t *testing.T) {
+		d, err := load(t, `["memory"]`, `{"retention_count":1,"retention_mode":"delete"}`)
+		require.NoError(t, err)
+		require.Len(t, d.Scenarios, 1)
+		require.NotNil(t, d.Scenarios[0].Plan)
+		require.NotNil(t, d.Scenarios[0].Plan.Store.RetentionCount)
+		assert.Equal(t, int64(1), *d.Scenarios[0].Plan.Store.RetentionCount)
 	})
 }

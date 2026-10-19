@@ -77,9 +77,11 @@ type Report struct {
 }
 
 const (
-	reasonFnv1a64         = "最初のメジャーにはハッシュを使う保存先がなく、FNV-1a 64 は段階 5 で実行する（設計 5.1）"
-	reasonMillis          = "Go の time.Time はナノ秒精度であり、representation.time_precision が milliseconds のケースは対象外（設計 5.1）"
-	reasonLayoutNoBackend = "配置照合は実行していない。DynamoDB に未接続（設計 7.2 の4番）"
+	reasonFnv1a64           = "最初のメジャーにはハッシュを使う保存先がなく、FNV-1a 64 は段階 5 で実行する（設計 5.1）"
+	reasonMillis            = "Go の time.Time はナノ秒精度であり、representation.time_precision が milliseconds のケースは対象外（設計 5.1）"
+	reasonUnprovidedBackend = "この言語（Go）は保存先 %s を提供しないため対象外"
+	reasonBigtableEnvelope  = "この言語（Go）は Bigtable の保存先を提供しないため、Bigtable の封筒の値の表は対象外"
+	reasonLayoutNoBackend   = "配置照合は実行していない。DynamoDB に未接続（設計 7.2 の4番）"
 )
 
 func nonNil(s []string) []string {

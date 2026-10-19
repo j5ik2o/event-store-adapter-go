@@ -3,6 +3,7 @@ package conformance
 import (
 	"fmt"
 	"math/big"
+	"sort"
 )
 
 // primaryStore is the reserved name of the store that the scenario opens first.
@@ -209,9 +210,31 @@ func (p *ScenarioPlan) SnapshotFixture(name string) (Snapshot, error) {
 	return toSnapshot(f)
 }
 
+// storeConfigKeys are the store settings that parseStoreConfig interprets. The schema also allows
+// settings of storages this language does not provide; a scenario of a provided storage that sets
+// one of them is rejected instead of running with the setting silently dropped.
+var storeConfigKeys = map[string]bool{
+	"retention_count":   true,
+	"retention_mode":    true,
+	"ttl_grace_seconds": true,
+	"layout_version":    true,
+	"retry_limit":       true,
+	"change_feed":       true,
+}
+
 func parseStoreConfig(m map[string]any) (StoreConfig, error) {
 	var c StoreConfig
 	var err error
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if !storeConfigKeys[k] {
+			return c, fmt.Errorf("%s is not a store setting this runner interprets", k)
+		}
+	}
 	if v, present := m["retention_count"]; present && v != nil {
 		n, err := bigIntFromJSONNumber(v)
 		if err != nil || !n.IsInt64() {

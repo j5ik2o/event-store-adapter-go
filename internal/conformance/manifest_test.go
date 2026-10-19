@@ -16,7 +16,7 @@ func TestVerifyManifest(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, r.Verified)
 		assert.Empty(t, r.Mismatches)
-		assert.Equal(t, 26, r.FileCount)
+		assert.Equal(t, 35, r.FileCount)
 	})
 
 	t.Run("a one-byte change in a copy is detected with its path", func(t *testing.T) {
@@ -48,7 +48,7 @@ func TestVerifyManifest(t *testing.T) {
 
 	t.Run("a changed manifest version is a mismatch", func(t *testing.T) {
 		root := copyTree(t)
-		replaceInFile(t, filepath.Join(root, "manifest.json"), `"version": "1.2.0"`, `"version": "9.9.9"`)
+		replaceInFile(t, filepath.Join(root, "manifest.json"), `"version": "1.3.0"`, `"version": "9.9.9"`)
 		r, err := VerifyManifest(root)
 		require.NoError(t, err)
 		assert.False(t, r.Verified)

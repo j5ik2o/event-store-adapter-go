@@ -6,14 +6,19 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/testhook"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // memDB is the record of a fake memory store. Stores that share one memDB share
-// their records and their optimistic lock.
+// their records, their optimistic lock and the retention setting of the storage.
 type memDB struct {
 	events map[string][]memRecord
+	// retention is the retention count of the storage. nil keeps no history.
+	retention *int64
+	snapshots map[string]Snapshot
+	history   map[string][]int64
 }
 
 type memRecord struct {
@@ -21,7 +26,14 @@ type memRecord struct {
 	tree  any
 }
 
-func newMemDB() *memDB { return &memDB{events: map[string][]memRecord{}} }
+func newMemDB(retention *int64) *memDB {
+	return &memDB{
+		events:    map[string][]memRecord{},
+		retention: retention,
+		snapshots: map[string]Snapshot{},
+		history:   map[string][]int64{},
+	}
+}
 
 // memFakeBackend is a fake storage backend that understands createStore and the payload
 // mutations. Its switches model the wrong implementations that the runner must reject.
@@ -30,43 +42,56 @@ type memFakeBackend struct {
 	shareOnNew bool
 	// noCopy keeps, records and returns the payload tree without copying it.
 	noCopy bool
-	first  *memFakeStore
-	log    []string
+	// ownSettingsOnShared makes a store created with storage "shared" use settings of its own
+	// (no retention) instead of the settings of the storage it shares.
+	ownSettingsOnShared bool
+	first               *memFakeStore
+	log                 []string
 }
 
 func (b *memFakeBackend) Name() string                                 { return "memory" }
 func (b *memFakeBackend) Injectable(FaultSpec) bool                    { return false }
 func (b *memFakeBackend) Seed(context.Context, []map[string]any) error { return nil }
 
-func (b *memFakeBackend) newStore(label string, db *memDB) *memFakeStore {
-	return &memFakeStore{b: b, label: label, db: db, written: map[int]any{}, read: map[int][]any{}}
+func (b *memFakeBackend) newStore(label string, db *memDB, retention *int64) *memFakeStore {
+	return &memFakeStore{b: b, label: label, db: db, retention: retention, written: map[int]any{}, read: map[int][]any{}}
 }
 
-func (b *memFakeBackend) Open(context.Context, StoreConfig, Injection) (Store, error) {
-	b.first = b.newStore("primary", newMemDB())
+func (b *memFakeBackend) Open(_ context.Context, cfg StoreConfig, inj Injection) (Store, error) {
+	db := newMemDB(cfg.RetentionCount)
+	inj.Hooks.ProvideHistory(func(aid string) (testhook.History, error) {
+		return testhook.History{Active: append([]int64{}, db.history[aid]...), Marked: []int64{}}, nil
+	})
+	b.first = b.newStore("primary", db, db.retention)
 	return b.first, nil
 }
 
-func (b *memFakeBackend) CreateStore(_ context.Context, _ StoreConfig, _ Injection, shared Store) (Store, error) {
+func (b *memFakeBackend) CreateStore(_ context.Context, cfg StoreConfig, _ Injection, shared Store) (Store, error) {
 	if shared != nil {
 		s, ok := shared.(*memFakeStore)
 		if !ok {
 			return nil, fmt.Errorf("unexpected shared store %T", shared)
 		}
-		return b.newStore("shared", s.db), nil
+		retention := s.db.retention
+		if b.ownSettingsOnShared {
+			retention = nil
+		}
+		return b.newStore("shared", s.db, retention), nil
 	}
 	if b.shareOnNew {
-		return b.newStore("second", b.first.db), nil
+		return b.newStore("second", b.first.db, b.first.db.retention), nil
 	}
-	return b.newStore("second", newMemDB()), nil
+	return b.newStore("second", newMemDB(cfg.RetentionCount), cfg.RetentionCount), nil
 }
 
 type memFakeStore struct {
-	b       *memFakeBackend
-	label   string
-	db      *memDB
-	written map[int]any
-	read    map[int][]any
+	b     *memFakeBackend
+	label string
+	db    *memDB
+	// retention is the retention count that this instance applies.
+	retention *int64
+	written   map[int]any
+	read      map[int][]any
 }
 
 func (s *memFakeStore) PersistEvent(ctx context.Context, ev Event) error {
@@ -90,17 +115,36 @@ func (s *memFakeStore) PersistEvent(ctx context.Context, ev Event) error {
 	return nil
 }
 
-func (s *memFakeStore) PersistEventAndSnapshot(ctx context.Context, ev Event, _ Snapshot) error {
-	return s.PersistEvent(ctx, ev)
+func (s *memFakeStore) PersistEventAndSnapshot(ctx context.Context, ev Event, sn Snapshot) error {
+	if err := s.PersistEvent(ctx, ev); err != nil {
+		return err
+	}
+	key := ev.AggregateID.TypeName + "-" + ev.AggregateID.Value
+	s.db.snapshots[key] = sn
+	if s.retention == nil {
+		s.db.history[key] = nil
+		return nil
+	}
+	h := append(s.db.history[key], ev.SeqNr)
+	if int64(len(h)) > *s.retention {
+		h = h[int64(len(h))-*s.retention:]
+	}
+	s.db.history[key] = h
+	return nil
 }
 
 func (s *memFakeStore) GetLatestSnapshotByID(_ context.Context, aid AggregateIDArg) (SnapshotRead, error) {
 	s.b.log = append(s.b.log, s.label+":getLatestSnapshotById")
-	recs := s.db.events[aid.TypeName+"-"+aid.Value]
+	key := aid.TypeName + "-" + aid.Value
+	recs := s.db.events[key]
 	if len(recs) == 0 {
 		return SnapshotRead{}, nil
 	}
-	return SnapshotRead{Found: true, HeadSeqNr: recs[len(recs)-1].event.SeqNr}, nil
+	read := SnapshotRead{Found: true, HeadSeqNr: recs[len(recs)-1].event.SeqNr}
+	if sn, ok := s.db.snapshots[key]; ok {
+		read.Snapshot = &sn
+	}
+	return read, nil
 }
 
 func (s *memFakeStore) GetEventsByIDSinceSeqNr(ctx context.Context, aid AggregateIDArg, since int64) ([]Event, error) {
@@ -358,6 +402,20 @@ func TestRunScenario_CreateStore(t *testing.T) {
 			r := runScenario(ctx, realCases[id], "memory", &memFakeBackend{})
 			assert.Equal(t, StatusSuccess, r.Status, "%s: %s", id, r.Reason)
 		}
+	})
+
+	t.Run("the distributed shared configuration case succeeds on a store that uses the settings of the shared storage", func(t *testing.T) {
+		c := loadMemoryCases(t, "memory-store-shared-configuration")["memory-store-shared-configuration"]
+		r := runScenario(ctx, c, "memory", &memFakeBackend{})
+		assert.Equal(t, StatusSuccess, r.Status, r.Reason)
+	})
+
+	t.Run("the distributed shared configuration case rejects a shared store that keeps its own default settings", func(t *testing.T) {
+		c := loadMemoryCases(t, "memory-store-shared-configuration")["memory-store-shared-configuration"]
+		r := runScenario(ctx, c, "memory", &memFakeBackend{ownSettingsOnShared: true})
+		assert.Equal(t, StatusFailure, r.Status)
+		require.NotNil(t, r.FailedStep)
+		assert.Equal(t, 2, *r.FailedStep)
 	})
 
 	t.Run("the distributed independent case rejects a new store that shares its records", func(t *testing.T) {
