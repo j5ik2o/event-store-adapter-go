@@ -2,7 +2,7 @@ module github.com/j5ik2o/event-store-adapter-go/v5
 
 go 1.25.0
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.47.3
