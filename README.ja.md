@@ -1,10 +1,15 @@
+> この文書は [README.md](README.md) の日本語版です。英語版が正本で、食い違うときは英語版に従います。
+
 # event-store-adapter-go
 
 [![CI](https://github.com/j5ik2o/event-store-adapter-go/actions/workflows/ci.yml/badge.svg)](https://github.com/j5ik2o/event-store-adapter-go/actions/workflows/ci.yml)
 [![Go project version](https://badge.fury.io/go/github.com%2Fj5ik2o%2Fevent-store-adapter-go.svg)](https://badge.fury.io/go/github.com%2Fj5ik2o%2Fevent-store-adapter-go)
 [![Renovate](https://img.shields.io/badge/renovate-enabled-brightgreen.svg)](https://renovatebot.com)
+[![License](https://img.shields.io/badge/License-APACHE2.0-blue.svg)](https://opensource.org/licenses/apache-2-0)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![tokei](https://tokei.rs/b1/github/j5ik2o/event-store-adapter-go)](https://github.com/XAMPPRocky/tokei)
+
+## 概要
 
 このライブラリは、CQRS/Event Sourcing 用の同期イベントストアを Memory と DynamoDB で提供します。
 
@@ -12,13 +17,28 @@
 
 [共通契約 v5](https://github.com/j5ik2o/event-store-adapter/blob/main/docs/spec/README.md) に従います。メジャーの番号 5 は、共通契約の版と同じです。
 
+他の言語のための実装:
+
+- [for Java](https://github.com/j5ik2o/event-store-adapter-java)
+- [for Scala](https://github.com/j5ik2o/event-store-adapter-scala)
+- [for Kotlin](https://github.com/j5ik2o/event-store-adapter-kotlin)
+- [for Rust](https://github.com/j5ik2o/event-store-adapter-rs)
+- [for Go](https://github.com/j5ik2o/event-store-adapter-go)
+- [for JavaScript/TypeScript](https://github.com/j5ik2o/event-store-adapter-js)
+- [for .NET](https://github.com/j5ik2o/event-store-adapter-dotnet)
+- [for PHP](https://github.com/j5ik2o/event-store-adapter-php)
+
+[共通文書](https://github.com/j5ik2o/event-store-adapter)も参照してください。
+
+## インストール
+
 導入:
 
 ```sh
 go get github.com/j5ik2o/event-store-adapter-go/v5
 ```
 
-## 使い方
+## はじめに
 
 イベントと集約状態は任意の Go 型を使えます。metadata は `EventEnvelope[E]`・`SnapshotEnvelope[A]` に置き、`Serializer[T]` は payload だけを扱います。集約 ID は `TypeName() string` と `Value() string` を実装します。ライブラリが「型名 + "-" + 値」を組み立てます。型名に `-` を含めず、全体を UTF-8 で1024バイト以下にします。
 
@@ -103,17 +123,21 @@ func main() {
 }
 ```
 
-メモリの保存先は単一プロセスのメモリだけを使います。ファイルへの保存、再起動後の回復、プロセス間の共有はしません。
-
 イベントの `SeqNr` は1から始まる連番です。番号の範囲は0〜9007199254740991で、イベントに0は使えません。`OccurredAt` は符号付き64ビットの Unix ナノ秒で表せる `time.Time` です。任意指定の `WithManifest` は、省略時に空文字列となります。
 
 `PersistEvent` はイベント番号から直前の head 番号を求めて照合します。`PersistEventAndSnapshot` はイベントと snapshot の番号が等しいことを要求し、一緒に確定します。version 引数と `IsCreated` は使いません。
 
 `GetLatestSnapshotByID` は head がなければ `(nil, nil)` を返します。head があっても `Snapshot` が nil の場合があります。復元は `Snapshot.SeqNr()+1`、snapshot がなければ1から行います。`HeadSeqNr` は snapshot の番号とは独立しており、復元の開始位置に使いません。イベント読取は指定番号を含み、該当する全イベントを昇順で返します。
 
-## DynamoDB
+## 保存先
 
-[DATABASE_SCHEMA.ja.md](docs/DATABASE_SCHEMA.ja.md) の3表と履歴 index を事前に作り、AWS SDK v2 の Client を渡します。3 つの表は同じリージョンに置き、書き込みもそのリージョンからだけ行ってください。グローバルテーブル（複数リージョンのレプリカ）は範囲外です。上の domain 型を使う factory は次のとおりです。
+### メモリ
+
+メモリの保存先は単一プロセスのメモリだけを使います。ファイルへの保存、再起動後の回復、プロセス間の共有はしません。
+
+### DynamoDB
+
+[DYNAMODB_DATABASE_SCHEMA.ja.md](docs/DYNAMODB_DATABASE_SCHEMA.ja.md) の3表と履歴 index を事前に作り、AWS SDK v2 の Client を渡します。3 つの表は同じリージョンに置き、書き込みもそのリージョンからだけ行ってください。グローバルテーブル（複数リージョンのレプリカ）は範囲外です。上の domain 型を使う factory は次のとおりです。
 
 ```go
 import (
@@ -138,29 +162,34 @@ func openDynamoDB(ctx context.Context, client *awsdb.Client) (eventstore.EventSt
 
 factory は3表の設定項目を照合し、すべて存在しない場合に transaction で作ります。表自体は作りません。head と current snapshot の BatchGetItem、journal の Query は強整合で読み、全頁を取得します。head と current snapshot の読取は原子的ではなく、並行書込により異なる番号が返る場合があります。
 
-## 保持とエラー
+## 直列化
+
+`Serializer[T]` は payload または集約状態だけを直列化し、封筒の metadata は渡されません。domain 型にライブラリ固有の interface は不要です。`Serialize(value T) ([]byte, error)` と `Deserialize(data []byte) (T, error)` を実装します。
+
+`NewJSONSerializer[T]()` は `encoding/json` を使います。型の決まっていない JSON の数値は `json.Number` として復元し、JSON の値が2つ以上ある入力は失敗にします。
+
+serializer が返したエラーは `SerializationError`（`KindSerialization`）に分類されます。serializer が nil の場合は `ConfigurationError` です。
+
+## 保持
 
 保持件数を省略するか `WithRetentionCount(NoRetention())` を渡すと、current snapshot だけを保存して履歴を作りません。`KeepLatest(n)` は `n >= 1` を要求し、current snapshot は件数に含めません。Memory は削除方式、DynamoDB は `RetentionDelete`（既定）と `RetentionTTL` に対応します。`WithTTLGraceSeconds` は0以上の猶予秒を指定します。
 
 保持処理は snapshot と履歴の確定後に同期で行います。失敗はログに記録され、`WithRetentionFailureHandler(func(context.Context, error))` でも通知できます。確定済み書込は成功のまま返ります。
 
+## エラー
+
 `KindOf(err)`（分類と bool を返す）または `errors.As` で、楽観ロック・契約違反・直列化・設定・保存先の5分類を区別します。`errors.Is` と `Unwrap` で元の原因を取得できます。DynamoDB の未処理キーと削除の再要求は `Config.ConfigurationReadRetryLimit` を共有します。既定は初回を除いて10回、0は再要求なしです。待機は50ミリ秒から倍増し、最大1秒となり、context の取消で中断できます。
 
-## テーブル仕様と移行
+## 移行
 
-属性・権限・保持は [DATABASE_SCHEMA.ja.md](docs/DATABASE_SCHEMA.ja.md)、コードと旧データの移行は [MIGRATION_GUIDE.ja.md](docs/MIGRATION_GUIDE.ja.md) を参照してください。
+属性・権限・保持は [DYNAMODB_DATABASE_SCHEMA.ja.md](docs/DYNAMODB_DATABASE_SCHEMA.ja.md)、コードと旧データの移行は [MIGRATION_GUIDE.ja.md](docs/MIGRATION_GUIDE.ja.md) を参照してください。
+
+## 適合
+
+`conformance/` に共通の適合テストデータ（版 `1.3.0`、[conformance/README.md](conformance/README.md) を参照）を置いています。CI の `lint` ジョブが `tools/conformance/manifest.py verify` と SHA-256 で照合します。
+
+CI の `conformance` ジョブは、`CONFORMANCE_REPORT` を設定して `go test -count=1 -v ./internal/conformance/...` を実行し、`conformance-report.json` を成果物として上げます。実行器は Memory と DynamoDB の両方の保存先を対象とし、DynamoDB はコンテナで起動した DynamoDB Local を使います。`CONFORMANCE_REPORT` がなければ、この試験は飛ばされます。
 
 ## ライセンス
 
-MITライセンスです。詳細は[LICENSE](LICENSE)を参照してください。
-
-## 他の言語のための実装
-
-- [for Java](https://github.com/j5ik2o/event-store-adapter-java)
-- [for Scala](https://github.com/j5ik2o/event-store-adapter-scala)
-- [for Kotlin](https://github.com/j5ik2o/event-store-adapter-kotlin)
-- [for Rust](https://github.com/j5ik2o/event-store-adapter-rs)
-- [for Go](https://github.com/j5ik2o/event-store-adapter-go)
-- [for JavaScript/TypeScript](https://github.com/j5ik2o/event-store-adapter-js)
-- [for .NET](https://github.com/j5ik2o/event-store-adapter-dotnet)
-- [for PHP](https://github.com/j5ik2o/event-store-adapter-php)
+MITライセンスです。詳細は[LICENSE-MIT](LICENSE-MIT)を参照してください。リポジトリには Apache License 2.0 の本文も [LICENSE-APACHE](LICENSE-APACHE) にあります。
