@@ -1,10 +1,18 @@
-# 封筒 API への移行
+> この文書は [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) の日本語版です。英語版が正本で、食い違うときは英語版に従います。
+
+# 移行ガイド
 
 [English](MIGRATION_GUIDE.md)
 
+## 概要
+
+このガイドは、封筒 API への移行を扱います。
+
 [共通契約 v5](https://github.com/j5ik2o/event-store-adapter/blob/main/docs/spec/README.md) に従います。メジャーの番号 5 は、共通契約の版と同じです。Go module パスは `github.com/j5ik2o/event-store-adapter-go/v5` です。
 
-## コードの移行
+## コードの変更
+
+### 封筒 API への移行
 
 1. 旧 `pkg` の import を module ルートの `eventstore` と `memory` または `dynamodb` に置き換えます。旧 package と互換 alias は削除されています。
 2. 公開4操作と `dynamodb.New` の先頭に `context.Context` を渡します。
@@ -35,14 +43,19 @@ for _, event := range events {
 
 [README](../README.ja.md) の domain 型を使う抜粋です。[実行可能な例](../example_test.go) と [repository の試験](../test/user_account_repository_test.go) は、snapshot 1・head 2 の場合と、snapshot なしでの復元を検証します。
 
-## Go の旧データ
+## データの移行
+
+### Go の旧データ
 
 Go の移行支援はこの手順書です。移行ツール・旧配置 reader・自動変換・実行時 fallback は提供しません。Rust v3 の移行ツールは異なる旧配置を対象とするため、Go のデータに流用しません。
 
 1. 旧書込を停止し、バックアップを保存します。**旧版のライブラリと旧 API** で journal と snapshot を全頁読みます。Client を切り替える前に、集約ごとのイベント順序、完全な metadata、payload、状態を記録します。
 2. 利用者の移行コードで、埋め込まれた metadata と domain の payload・状態を分けます。旧 ID とイベント型の定義を確認します。旧 `GetOccurredAt() uint64` は時刻の単位を定めていません。アプリケーションの旧定義を確認してから `time.Time` に変換し、単位や失われた精度・型情報を推測しません。
-3. [DATABASE_SCHEMA](DATABASE_SCHEMA.ja.md) の**新しい3表配置**、履歴 GSI、必要に応じた TTL を作ります。`dynamodb.New` に配置版1の一致する設定項目を作らせます。旧表と新表を混ぜません。
+3. [DYNAMODB_DATABASE_SCHEMA](DYNAMODB_DATABASE_SCHEMA.ja.md) の**新しい3表配置**、履歴 GSI、必要に応じた TTL を作ります。`dynamodb.New` に配置版1の一致する設定項目を作らせます。旧表と新表を混ぜません。
 4. 集約ごとに検査済み封筒を作り、元の順序を保って **1, 2, 3, … の連続番号**で新 API に書き直します。snapshot はその番号までの状態から作り、同じ番号の pair 書込で保存します。旧 snapshot だけでは、この書直しに必要なイベント履歴の代わりになりません。
-5. 新 API で読み戻し、イベント件数・metadata・payload・復元状態を旧版で取得した記録と比較します。確認後にアプリケーションの読取と書込を切り替え、移行が受け入れられるまでバックアップを保存します。
 
 旧2表のシャード付きキーと snapshot の version 属性をそのまま再利用できません。時刻の変換と metadata/payload の分離は利用者の移行コードが担当します。
+
+## 確認と切り替え
+
+5. 新 API で読み戻し、イベント件数・metadata・payload・復元状態を旧版で取得した記録と比較します。確認後にアプリケーションの読取と書込を切り替え、移行が受け入れられるまでバックアップを保存します。

@@ -1,0 +1,12 @@
+{
+  "package": "event-store-adapter-go",
+  "docs_root": ".",
+  "storages": [
+    "memory",
+    "dynamodb"
+  ],
+  "extra_documents": [],
+  "moved": {
+    "docs/DATABASE_SCHEMA.md": "docs/DYNAMODB_DATABASE_SCHEMA.md"
+  }
+}
