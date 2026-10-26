@@ -22,7 +22,7 @@
 ## ローカルの準備
 
 - Go: `go.mod` は `go 1.25.0` と `toolchain go1.27.3` を宣言しています。CI は Go 1.27 を使います（`actions/setup-go`）。
-- Python 3: CI は Python 3.15 で、`tools/` 以下のスクリプトと `.github/` 以下の試験を実行します。
+- Python 3: CI は Python 3.15 で、`tools/` 以下のスクリプトと `.github/` 以下の試験を実行します。 `tools/user-docs/check.py` は Python 3.10 以上が必要です。
 - Docker: `make test` は `./...` を実行し、`internal/dynamodbtest` の試験を含みます。この試験は testcontainers-go で DynamoDB Local のコンテナを起動します。DynamoDB の適合の実行器も DynamoDB Local のコンテナを使います。
 - 依存は `make prepare`（`go mod download`）で取得します。
 - 道具は `make install-tools`（staticcheck と goimports。どちらも `@latest`）または `bash setup.sh`（staticcheck の `@latest`）で入れます。CI は staticcheck を `v0.8.2` に固定しています。
@@ -52,5 +52,5 @@ CI（`.github/workflows/ci.yml`）は次を実行します。変更提案を出�
 
 - 変更提案は `main` に向けて出します。`CI Success` ジョブは、`lint`、`test`、`release-checks`、`conformance` のすべての成功を要求します。
 - リリースは `Release` ワークフロー（`.github/workflows/release.yml`、`workflow_dispatch`）を手動で起動して行います。入力は `level`（`auto`、`patch`、`minor`、`major`）と `version` です。このワークフローが `version` ファイルを更新し、タグと GitHub Release を作るので、`version` を手で編集しないでください。
-- `level=auto` のときは、Conventional Commits の件名から上げ幅を決めます。`feat` と `revert` は minor、型の後ろの `!` または `BREAKING CHANGE` のフッターは major、それ以外は patch です（`.github/semver-level.py`）。
+- `level=auto` のときは、Conventional Commits の件名から上げ幅を決めます。`feat` と `revert` は minor、型の後ろの `!` または `BREAKING CHANGE:` または `BREAKING-CHANGE:` のフッターは major、それ以外は patch です（`.github/semver-level.py`）。
 - Renovate は、接頭辞 `chore(deps):` で依存の更新を出します。minor、patch、pin、digest の更新は自動でマージされます（`renovate.json`）。

@@ -22,7 +22,7 @@ Some files in this repository are copies of shared data, and CI checks them agai
 ## Local setup
 
 - Go: `go.mod` declares `go 1.25.0` and `toolchain go1.27.3`. CI uses Go 1.27 (`actions/setup-go`).
-- Python 3: CI uses Python 3.15 to run the scripts under `tools/` and the tests under `.github/`.
+- Python 3: CI uses Python 3.15 to run the scripts under `tools/` and the tests under `.github/`. `tools/user-docs/check.py` requires Python 3.10 or later.
 - Docker: `make test` runs `./...`, which includes the tests in `internal/dynamodbtest`. They start DynamoDB Local in a container with testcontainers-go. The conformance runner for DynamoDB also uses a DynamoDB Local container.
 - Download the dependencies with `make prepare` (`go mod download`).
 - Install the tools with `make install-tools` (staticcheck and goimports, both `@latest`) or with `bash setup.sh` (staticcheck `@latest`). CI pins staticcheck to `v0.8.2`.
@@ -52,5 +52,5 @@ Other commands from the `Makefile`:
 
 - Open pull requests against `main`. The `CI Success` job requires `lint`, `test`, `release-checks`, and `conformance` to succeed.
 - Releases are started manually with the `Release` workflow (`.github/workflows/release.yml`, `workflow_dispatch`). Its inputs are `level` (`auto`, `patch`, `minor`, or `major`) and `version`. The workflow updates the `version` file and creates the tag and the GitHub Release, so do not edit `version` by hand.
-- With `level=auto`, the bump is decided from Conventional Commits subjects: `feat` and `revert` give a minor bump, `!` after the type or a `BREAKING CHANGE` footer gives a major bump, and anything else gives a patch bump (`.github/semver-level.py`).
+- With `level=auto`, the bump is decided from Conventional Commits subjects: `feat` and `revert` give a minor bump, `!` after the type or a `BREAKING CHANGE:` or `BREAKING-CHANGE:` footer gives a major bump, and anything else gives a patch bump (`.github/semver-level.py`).
 - Renovate opens dependency updates with the prefix `chore(deps):`. Minor, patch, pin, and digest updates are merged automatically (`renovate.json`).
