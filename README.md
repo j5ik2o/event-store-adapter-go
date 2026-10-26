@@ -28,6 +28,8 @@ Other implementations:
 
 See also the [common documents](https://github.com/j5ik2o/event-store-adapter).
 
+To change this repository, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Installation
 
 ```sh

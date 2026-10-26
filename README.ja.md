@@ -30,6 +30,8 @@
 
 [共通文書](https://github.com/j5ik2o/event-store-adapter)も参照してください。
 
+このリポジトリを変更するときは [CONTRIBUTING.ja.md](CONTRIBUTING.ja.md) を参照してください。
+
 ## インストール
 
 導入:
