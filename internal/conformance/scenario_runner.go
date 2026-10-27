@@ -39,7 +39,7 @@ func runScenario(ctx context.Context, c ScenarioCase, backend string, b Backend)
 		return set(StatusNotApplicable, reasonMemoryTTL)
 	case b == nil:
 		return set(StatusUnverified, reasonNoBackend)
-	case plan.Store.ChangeFeed && backend != "sqlite":
+	case plan.Store.ChangeFeed && backend != "sqlite" && backend != "spanner":
 		return set(StatusUnrepresentable, reasonChangeFeed)
 	}
 	for _, f := range plan.Faults {

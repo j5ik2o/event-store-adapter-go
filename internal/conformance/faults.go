@@ -140,8 +140,8 @@ var hookPhases = map[testhook.Phase]bool{
 	testhook.PhaseRetentionQuery: true, testhook.PhaseRetentionDelete: true,
 }
 
-// registerHookFaults registers on h the faults that go through testhook: storage-error and
-// serialization-error on the hook phases, and sdk-response with history_pages on retention-query.
+// registerHookFaults registers on h the faults that go through testhook: storage-error, serialization-error and
+// transaction-aborted on the hook phases (a replace-response commit fault on the commit response), and sdk-response with history_pages on retention-query.
 // Other faults (sdk-error, the other sdk-response, read-interleave) are applied by the backend
 // through Injection.Faults.
 func registerHookFaults(h *testhook.Hooks, faults []*Fault) {
@@ -152,18 +152,24 @@ func registerHookFaults(h *testhook.Hooks, faults []*Fault) {
 			continue
 		}
 		switch f.Spec.Kind {
-		case "storage-error", "serialization-error":
+		case "storage-error", "serialization-error", "transaction-aborted":
 			f := f
-			h.OnFail(phase, func(testhook.Point) error {
+			hook := func(testhook.Point) error {
 				if f.TryApply() {
 					message, ok := f.Spec.Details["message"].(string)
 					if !ok {
 						message = f.Spec.Kind
 					}
-					return &testhook.InjectedError{Phase: phase, Message: message}
+					return &testhook.InjectedError{Phase: phase, Message: message, Aborted: f.Spec.Kind == "transaction-aborted"}
 				}
 				return nil
-			})
+			}
+			if f.Spec.Injection == "replace-response" && phase == testhook.PhaseCommit {
+				// The commit succeeded on the server and only its response is lost (SPN-8).
+				h.OnCommitResponse(hook)
+			} else {
+				h.OnFail(phase, hook)
+			}
 		case "sdk-response":
 			if phase == testhook.PhaseRetentionQuery {
 				if _, ok := historyPages(f.Spec.Details); ok {

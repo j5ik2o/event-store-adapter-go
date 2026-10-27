@@ -15,6 +15,9 @@ type ScenarioPlan struct {
 	Seed  []map[string]any
 	// onlySQLite is true when the backends of the scenario are exactly [sqlite]: only then are the SQLite-only operations known.
 	onlySQLite bool
+	// SeedRowDeletionPolicyDays is seed.row_deletion_policy_days: the INTERVAL of the row deletion policy of the Spanner
+	// history table, or nil when the table has no policy.
+	SeedRowDeletionPolicyDays *int64
 	// SeedConfiguration is seed.configuration: the configuration a SQLite destination holds before the store is opened.
 	SeedConfiguration map[string]any
 	Init              *InitPlan
@@ -138,6 +141,9 @@ func parseScenario(m map[string]any) (*ScenarioPlan, error) {
 				return nil, fmt.Errorf("seed.configuration is not an object")
 			}
 			p.SeedConfiguration = cm
+			if p.SeedRowDeletionPolicyDays, err = optInt64(sm, "row_deletion_policy_days"); err != nil {
+				return nil, fmt.Errorf("seed.row_deletion_policy_days: %w", err)
+			}
 		} else {
 			items, ok := sm["items"].([]any)
 			if !ok {
@@ -242,6 +248,9 @@ var storeConfigKeys = map[string]bool{
 	"change_feed":       true,
 
 	"lock_wait_milliseconds": true,
+
+	"transaction_retry_limit": true,
+	"ttl_grace_days":          true,
 }
 
 func parseStoreConfig(m map[string]any) (StoreConfig, error) {
@@ -279,6 +288,12 @@ func parseStoreConfig(m map[string]any) (StoreConfig, error) {
 		return c, err
 	}
 	if c.LockWaitMilliseconds, err = optInt64(m, "lock_wait_milliseconds"); err != nil {
+		return c, err
+	}
+	if c.TTLGraceDays, err = optInt64(m, "ttl_grace_days"); err != nil {
+		return c, err
+	}
+	if c.TransactionRetryLimit, err = optInt64(m, "transaction_retry_limit"); err != nil {
 		return c, err
 	}
 	if v, present := m["change_feed"]; present {
@@ -611,8 +626,9 @@ func checkSQLiteOnlyUse(p *ScenarioPlan, backends, rules []string) error {
 	if p.Store.LockWaitMilliseconds != nil && !onlySQLite {
 		return fmt.Errorf("lock_wait_milliseconds is only for a scenario whose backends are exactly [sqlite]")
 	}
-	if p.SeedConfiguration != nil && !onlySQLite {
-		return fmt.Errorf("seed.configuration is only for a scenario whose backends are exactly [sqlite]")
+	onlySpanner := len(backends) == 1 && backends[0] == "spanner"
+	if p.SeedConfiguration != nil && !onlySQLite && !onlySpanner {
+		return fmt.Errorf("seed.configuration is only for a scenario whose backends are exactly [sqlite] or exactly [spanner]")
 	}
 	held, failedWhileHeld, usesLock := false, false, false
 	for _, step := range p.Steps {
@@ -649,6 +665,44 @@ func checkSQLiteOnlyUse(p *ScenarioPlan, backends, rules []string) error {
 	}
 	if !failedWhileHeld {
 		return fmt.Errorf("no persist expects a storage error while the write lock is held")
+	}
+	return nil
+}
+
+// checkSpannerOnlyUse rejects the misuse that conformance/README.md defines as a data error for Spanner: the settings
+// transaction_retry_limit and ttl_grace_days and seed.row_deletion_policy_days are for a scenario whose backends are
+// exactly ["spanner"]; a Spanner TTL scenario names ttl_grace_days; and a transaction-aborted fault is used only by such
+// a scenario that names the rule SPN-7, sets transaction_retry_limit and fails the commit by replacing the request.
+func checkSpannerOnlyUse(p *ScenarioPlan, backends, rules []string) error {
+	onlySpanner := len(backends) == 1 && backends[0] == "spanner"
+	if !onlySpanner {
+		if p.Store.TransactionRetryLimit != nil {
+			return fmt.Errorf("transaction_retry_limit is only for a scenario whose backends are exactly [spanner]")
+		}
+		if p.Store.TTLGraceDays != nil {
+			return fmt.Errorf("ttl_grace_days is only for a scenario whose backends are exactly [spanner]")
+		}
+		if p.SeedRowDeletionPolicyDays != nil {
+			return fmt.Errorf("seed.row_deletion_policy_days is only for a scenario whose backends are exactly [spanner]")
+		}
+	}
+	if onlySpanner && p.Store.RetentionMode == "ttl" && p.Store.TTLGraceDays == nil {
+		return fmt.Errorf("a Spanner scenario with retention_mode ttl needs store.ttl_grace_days")
+	}
+	for _, f := range p.Faults {
+		if f.Kind != "transaction-aborted" {
+			continue
+		}
+		switch {
+		case !onlySpanner:
+			return fmt.Errorf("a transaction-aborted fault is only for a scenario whose backends are exactly [spanner]")
+		case f.Phase != "commit" || f.Injection != "replace-request" || f.Repeat != repeatCount:
+			return fmt.Errorf("a transaction-aborted fault needs phase commit, injection replace-request and a count repeat")
+		case !contains(rules, "SPN-7"):
+			return fmt.Errorf("a scenario with a transaction-aborted fault needs the rule SPN-7")
+		case p.Store.TransactionRetryLimit == nil:
+			return fmt.Errorf("a scenario with a transaction-aborted fault needs store.transaction_retry_limit")
+		}
 	}
 	return nil
 }

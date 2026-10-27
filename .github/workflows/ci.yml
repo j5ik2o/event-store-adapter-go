@@ -31,7 +31,7 @@ jobs:
         run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     needs: lint
     steps:
       - uses: actions/checkout@v7
@@ -58,12 +58,14 @@ jobs:
           actionlint
   conformance:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version: '1.27'
+      # DynamoDB Local and the Cloud Spanner emulator are started in containers by the tests
+      # (testcontainers-go); Docker is available on ubuntu-latest. A container that does not start fails the job.
       - name: Run conformance runner
         env:
           CONFORMANCE_REPORT: ${{ github.workspace }}/conformance-report.json

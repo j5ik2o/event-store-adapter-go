@@ -696,6 +696,14 @@ func TestRunScenario_ChangeFeed(t *testing.T) {
 		assert.Equal(t, int32(1), b.opens, "a change feed request must reach the sqlite backend instead of being skipped")
 	})
 
+	t.Run("spanner runs a change feed request and opens the store so the backend can reject it", func(t *testing.T) {
+		b := &fakeBackend{name: "spanner", injectable: true}
+		c := mkCase(t, withStore(`{"retention_count":null,"retention_mode":"delete","change_feed":true}`))
+		r := runScenario(ctx, c, "spanner", b)
+		assert.NotEqual(t, StatusUnrepresentable, r.Status, r.Reason)
+		assert.Equal(t, int32(1), b.opens, "a change feed request must reach the spanner backend instead of being reported as unrepresentable")
+	})
+
 	t.Run("a missing change_feed means false and the scenario runs", func(t *testing.T) {
 		b := &fakeBackend{name: "memory", injectable: true}
 		c := mkCase(t, scenarioBody("", "", persistOK))
@@ -726,7 +734,7 @@ func TestRunScenario_ChangeFeed(t *testing.T) {
 }
 
 func outOfScopeFile(file string) bool {
-	for _, dir := range []string{"spanner/", "bigtable/", "values/bigtable-envelope.json"} {
+	for _, dir := range []string{"bigtable/", "values/bigtable-envelope.json"} {
 		if strings.HasPrefix(file, dir) {
 			return true
 		}
@@ -774,7 +782,7 @@ func TestRunBackend_OutOfScope(t *testing.T) {
 			rep := BuildReport(ManifestResult{Verified: true}, results, nil, GateResult{}, nil)
 			var checked int
 			for rule, counts := range rep.Rules {
-				if !strings.HasPrefix(rule, "SPN-") && !strings.HasPrefix(rule, "BT-") {
+				if !strings.HasPrefix(rule, "BT-") {
 					continue
 				}
 				checked++
@@ -787,6 +795,23 @@ func TestRunBackend_OutOfScope(t *testing.T) {
 			assert.Positive(t, checked)
 			require.Contains(t, rep.Rules, "BT-D6a")
 			assert.Positive(t, rep.Rules["BT-D6a"][StatusNotApplicable])
+		})
+	}
+
+	for _, name := range []string{"memory", "dynamodb", "sqlite"} {
+		name := name
+		t.Run(name+" reports the Spanner-only cases as not applicable because the storage is not in their backends", func(t *testing.T) {
+			results := RunBackend(ctx, d, &fakeBackend{name: name})
+			seen := 0
+			for _, r := range results {
+				if !strings.HasPrefix(r.ID, "spanner-") {
+					continue
+				}
+				seen++
+				assert.Equal(t, StatusNotApplicable, r.Status, r.ID)
+				assert.NotEmpty(t, r.Reason, r.ID)
+			}
+			assert.Equal(t, 14, seen)
 		})
 	}
 

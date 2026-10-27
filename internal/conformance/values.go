@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"time"
 
 	eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/keyhash"
 )
 
 // valueAggregateID deliberately has a caller-defined representation in addition to
@@ -64,6 +66,9 @@ func runValueCase(c ValueCase) CaseResult {
 		default:
 			err = fmt.Errorf("unsupported seq_nr context %v", c.Input.Raw["context"])
 		}
+	case "fnv1a64":
+		input, _ := c.Input.Raw["utf8"].(string)
+		value = fnvValue(input, c.Expect)
 	default:
 		err = fmt.Errorf("unsupported value operation %q", c.Operation)
 	}
@@ -123,4 +128,20 @@ func compareValueResult(res CaseResult, expect map[string]any, value any, err er
 		res.Status, res.Reason = StatusSuccess, ""
 	}
 	return res
+}
+
+var fnvExpectedFormat = regexp.MustCompile(`^0x[0-9a-fA-F]{16}$`)
+
+// fnvValue computes FNV-1a 64 of the UTF-8 input as an unsigned 64-bit integer and returns it in the "0x" and sixteen
+// digits form of the data. An expected value that does not have that form never equals the result; one that has it
+// is compared as an unsigned integer, not as text.
+func fnvValue(input string, expect map[string]any) string {
+	actual := keyhash.FNV1a64([]byte(input))
+	text := fmt.Sprintf("0x%016x", actual)
+	if want, ok := expect["value"].(string); ok && fnvExpectedFormat.MatchString(want) {
+		if parsed, err := strconv.ParseUint(want[2:], 16, 64); err == nil && parsed == actual {
+			return want
+		}
+	}
+	return text
 }

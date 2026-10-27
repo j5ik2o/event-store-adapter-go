@@ -27,7 +27,7 @@ func RunBackend(ctx context.Context, data *Data, backend Backend) []CaseResult {
 		switch {
 		case c.OutOfScope:
 			res.Status, res.Reason = StatusNotApplicable, reasonBigtableEnvelope
-		case c.Operation == "fnv1a64":
+		case c.Operation == "fnv1a64" && name != "spanner":
 			res.Status, res.Reason = StatusNotApplicable, reasonFnv1a64
 		case c.TimePrecision == "milliseconds":
 			res.Status, res.Reason = StatusNotApplicable, reasonMillis
@@ -151,7 +151,7 @@ func ClassifyError(err error) error { return coreOperationError(err) }
 func ApplicableCases(data *Data, backend string) []string {
 	var ids []string
 	for _, c := range data.Values {
-		if !c.OutOfScope && c.Operation != "fnv1a64" && c.TimePrecision != "milliseconds" {
+		if !c.OutOfScope && (c.Operation != "fnv1a64" || backend == "spanner") && c.TimePrecision != "milliseconds" {
 			ids = append(ids, c.ID)
 		}
 	}

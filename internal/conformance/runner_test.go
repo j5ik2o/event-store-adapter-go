@@ -12,6 +12,7 @@ import (
 
 	"github.com/j5ik2o/event-store-adapter-go/v5/internal/conformance"
 	"github.com/j5ik2o/event-store-adapter-go/v5/internal/dynamodbtest"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/spannertest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -29,14 +30,25 @@ func TestConformance(t *testing.T) {
 			t.Cleanup(func() { require.NoError(t, environment.Close(context.Background())) })
 		}
 		return environment, err
-	})
+	}, startSpannerEnvironment(t))
 	t.Logf("summary: %v", report.Summary)
 	require.NoError(t, err)
 }
 
+// startSpannerEnvironment starts the real emulator for the conformance run; the test owns its shutdown.
+func startSpannerEnvironment(t *testing.T) func(context.Context) (*spannertest.Environment, error) {
+	return func(ctx context.Context) (*spannertest.Environment, error) {
+		environment, err := spannertest.Start(ctx)
+		if err == nil {
+			t.Cleanup(func() { require.NoError(t, environment.Close(context.Background())) })
+		}
+		return environment, err
+	}
+}
+
 // runConformance retains preparation diagnostics and attempts every report before
 // returning failure. The start function owns cleanup of a successfully started environment.
-func runConformance(ctx context.Context, root, requiredPath, path string, start func(context.Context) (*dynamodbtest.Environment, error)) (conformance.Report, error) {
+func runConformance(ctx context.Context, root, requiredPath, path string, start func(context.Context) (*dynamodbtest.Environment, error), startSpanner func(context.Context) (*spannertest.Environment, error)) (conformance.Report, error) {
 	var causes []error
 	record := func(stage string, err error) {
 		if err != nil {
@@ -57,11 +69,19 @@ func runConformance(ctx context.Context, root, requiredPath, path string, start 
 		}
 	}
 	var results []conformance.CaseResult
-	backends := []conformance.BackendState{{Name: "memory"}, {Name: "dynamodb"}, {Name: "sqlite"}}
+	backends := []conformance.BackendState{{Name: "memory"}, {Name: "dynamodb"}, {Name: "sqlite"}, {Name: "spanner"}}
 	if len(causes) == 0 {
 		environment, err := start(ctx)
 		record("setup", err)
-		if err == nil {
+		spannerEnvironment, spannerErr := startSpanner(ctx)
+		record("spanner setup", spannerErr)
+		var spannerDatabase *spannertest.Database
+		if spannerErr == nil {
+			var databaseErr error
+			spannerDatabase, databaseErr = spannerEnvironment.CreateDatabase(ctx)
+			record("spanner database", databaseErr)
+		}
+		if err == nil && spannerDatabase != nil {
 			for i, run := range []struct {
 				name    string
 				backend conformance.Backend
@@ -69,6 +89,7 @@ func runConformance(ctx context.Context, root, requiredPath, path string, start 
 				{"memory", &publicBackend{name: "memory"}},
 				{"dynamodb", &publicBackend{name: "dynamodb", environment: environment}},
 				{"sqlite", newSQLiteBackend()},
+				{"spanner", newSpannerBackend(spannerDatabase)},
 			} {
 				actual := conformance.RunBackend(ctx, data, run.backend)
 				results = append(results, actual...)
@@ -127,22 +148,30 @@ func TestConformanceSetupFailureReport(t *testing.T) {
 				path = filepath.Join(t.TempDir(), "missing", "conformance-report.json")
 			}
 			cause := errors.New("declared container startup failure")
-			starts := 0
+			spannerCause := errors.New("declared emulator startup failure")
+			starts, spannerStarts := 0, 0
 
 			report, err := runConformance(t.Context(), filepath.Join("..", "..", "conformance"), "required.json", path, func(context.Context) (*dynamodbtest.Environment, error) {
 				starts++
 				return nil, cause
+			}, func(context.Context) (*spannertest.Environment, error) {
+				spannerStarts++
+				return nil, spannerCause
 			})
 
 			require.ErrorIs(t, err, cause)
+			require.ErrorIs(t, err, spannerCause, "a Spanner emulator that does not start is a failure, never a skip")
 			require.Equal(t, 1, starts)
+			require.Equal(t, 1, spannerStarts)
 			require.Contains(t, report.Errors, "setup: "+cause.Error())
+			require.Contains(t, report.Errors, "spanner setup: "+spannerCause.Error())
 			require.True(t, report.Manifest.Verified)
 			require.Len(t, report.Required.Lists["memory"], 67)
 			require.Len(t, report.Required.Lists["dynamodb"], 106)
 			require.Len(t, report.Required.Lists["sqlite"], 68)
+			require.Len(t, report.Required.Lists["spanner"], 79)
 			require.Empty(t, report.Cases)
-			require.Equal(t, []conformance.BackendState{{Name: "memory"}, {Name: "dynamodb"}, {Name: "sqlite"}}, report.Backends)
+			require.Equal(t, []conformance.BackendState{{Name: "memory"}, {Name: "dynamodb"}, {Name: "sqlite"}, {Name: "spanner"}}, report.Backends)
 			require.NotEmpty(t, report.FailureReasons())
 			if writable {
 				raw, readErr := os.ReadFile(path)
@@ -192,12 +221,15 @@ func TestConformancePreparationFailureReport(t *testing.T) {
 			report, err := runConformance(t.Context(), root, requiredPath, path, func(context.Context) (*dynamodbtest.Environment, error) {
 				starts++
 				return nil, errors.New("setup must not run with invalid preparation")
+			}, func(context.Context) (*spannertest.Environment, error) {
+				starts++
+				return nil, errors.New("spanner setup must not run with invalid preparation")
 			})
 
 			require.ErrorContains(t, err, stage+": ")
 			require.Zero(t, starts)
 			require.Empty(t, report.Cases)
-			require.Equal(t, []conformance.BackendState{{Name: "memory"}, {Name: "dynamodb"}, {Name: "sqlite"}}, report.Backends)
+			require.Equal(t, []conformance.BackendState{{Name: "memory"}, {Name: "dynamodb"}, {Name: "sqlite"}, {Name: "spanner"}}, report.Backends)
 			raw, readErr := os.ReadFile(path)
 			require.NoError(t, readErr)
 			var saved conformance.Report
@@ -310,4 +342,41 @@ func TestPublicSQLiteConformance(t *testing.T) {
 	gate, err := conformance.EvaluateRequired(conformance.RequiredList{"sqlite": required["sqlite"]}, results)
 	require.NoError(t, err)
 	require.Empty(t, gate.Violations)
+}
+
+// TestPublicSpannerConformance runs every applicable case against a real Spanner emulator. No case is skipped or
+// unrepresentable: the unsupported change feed is a successful rejection, and a case that does not run fails the gate.
+func TestPublicSpannerConformance(t *testing.T) {
+	data, err := conformance.LoadData(filepath.Join("..", "..", "conformance"))
+	require.NoError(t, err)
+	required, err := conformance.LoadRequired("required.json")
+	require.NoError(t, err)
+	ctx := context.Background()
+	environment, err := startSpannerEnvironment(t)(ctx)
+	require.NoError(t, err)
+	database, err := environment.CreateDatabase(ctx)
+	require.NoError(t, err)
+
+	results := conformance.RunBackend(ctx, data, newSpannerBackend(database))
+
+	success := 0
+	for _, result := range results {
+		if result.Backend != "spanner" {
+			continue
+		}
+		switch result.Status {
+		case conformance.StatusSuccess:
+			success++
+		case conformance.StatusNotApplicable:
+		default:
+			t.Errorf("%s: %s: %s", result.ID, result.Status, result.Reason)
+		}
+	}
+	applicable := conformance.ApplicableCases(data, "spanner")
+	require.Len(t, applicable, 79)
+	require.Equal(t, len(applicable), success, "every applicable case succeeds: zero failures and zero unverified")
+	gate, err := conformance.EvaluateRequired(conformance.RequiredList{"spanner": required["spanner"]}, results)
+	require.NoError(t, err)
+	require.Empty(t, gate.Violations)
+	require.ElementsMatch(t, applicable, required["spanner"])
 }

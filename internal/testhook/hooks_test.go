@@ -184,3 +184,58 @@ func TestImportsAreStandardLibraryOnly(t *testing.T) {
 	}
 	assert.Positive(t, checked)
 }
+
+func TestHooks_CommitResponse(t *testing.T) {
+	commit := mustPhase(t, "commit")
+
+	t.Run("a nil Hooks lets the commit response through", func(t *testing.T) {
+		var h *Hooks
+		assert.NoError(t, h.CommitResponse(Point{Phase: commit}))
+	})
+
+	t.Run("a hook that returns an error loses the commit response", func(t *testing.T) {
+		h := New()
+		lost := &InjectedError{Phase: commit, Message: "response lost"}
+		h.OnCommitResponse(func(Point) error { return lost })
+		assert.ErrorIs(t, h.CommitResponse(Point{Phase: commit, AggregateID: "Order-1", SeqNr: 1}), lost)
+	})
+
+	t.Run("response hooks run in registration order and the first error is returned", func(t *testing.T) {
+		h := New()
+		var order []int
+		first, second := errors.New("first"), errors.New("second")
+		h.OnCommitResponse(func(Point) error { order = append(order, 1); return first })
+		h.OnCommitResponse(func(Point) error { order = append(order, 2); return second })
+		assert.ErrorIs(t, h.CommitResponse(Point{Phase: commit}), first)
+		assert.Equal(t, []int{1}, order)
+	})
+
+	t.Run("the response hook is separate from the commit fail hook", func(t *testing.T) {
+		h := New()
+		called := 0
+		h.OnFail(commit, func(Point) error { called++; return errors.New("before commit") })
+		assert.NoError(t, h.CommitResponse(Point{Phase: commit}), "a Fail hook must not run for the response")
+		assert.Zero(t, called)
+
+		responses := 0
+		h.OnCommitResponse(func(Point) error { responses++; return nil })
+		require.Error(t, h.Fail(Point{Phase: commit}))
+		assert.Zero(t, responses, "a response hook must not run for the commit request")
+	})
+}
+
+func TestInjectedError_Aborted(t *testing.T) {
+	t.Run("an injected error is not an abort unless it says so", func(t *testing.T) {
+		err := error(&InjectedError{Phase: mustPhase(t, "commit"), Message: "x"})
+		var injected *InjectedError
+		require.ErrorAs(t, err, &injected)
+		assert.False(t, injected.Aborted)
+	})
+
+	t.Run("an aborted injected error keeps its flag through wrapping", func(t *testing.T) {
+		err := errors.Join(errors.New("context"), &InjectedError{Phase: mustPhase(t, "commit"), Message: "x", Aborted: true})
+		var injected *InjectedError
+		require.ErrorAs(t, err, &injected)
+		assert.True(t, injected.Aborted)
+	})
+}

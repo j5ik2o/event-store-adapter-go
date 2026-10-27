@@ -256,4 +256,48 @@ func TestRegisterHookFaults(t *testing.T) {
 		assert.NoError(t, h.Fail(testhook.Point{Phase: phase("commit")}))
 		assert.Equal(t, 0, fs[0].Fired())
 	})
+
+	t.Run("a transaction-aborted fault returns an injected error that is marked as an abort", func(t *testing.T) {
+		cur := &operationCursor{}
+		cur.Set(2)
+		fs := newFaults([]FaultSpec{countSpec(2, "commit", "transaction-aborted", 2)}, cur)
+		h := testhook.New()
+		registerHookFaults(h, fs)
+
+		for i := 0; i < 2; i++ {
+			err := h.Fail(testhook.Point{Phase: phase("commit"), AggregateID: "Order-9", SeqNr: 2})
+			var injected *testhook.InjectedError
+			require.ErrorAs(t, err, &injected)
+			assert.True(t, injected.Aborted, "the library must re-run an aborted commit")
+		}
+		assert.NoError(t, h.Fail(testhook.Point{Phase: phase("commit"), SeqNr: 2}), "the abort stops after the configured count")
+		assert.Equal(t, 2, fs[0].Fired())
+	})
+
+	t.Run("a storage-error fault is not marked as an abort", func(t *testing.T) {
+		cur := &operationCursor{}
+		cur.Set(1)
+		fs := newFaults([]FaultSpec{countSpec(1, "commit", "storage-error", 1)}, cur)
+		h := testhook.New()
+		registerHookFaults(h, fs)
+		var injected *testhook.InjectedError
+		require.ErrorAs(t, h.Fail(testhook.Point{Phase: phase("commit")}), &injected)
+		assert.False(t, injected.Aborted)
+	})
+
+	t.Run("a replace-response fault fails the commit response, never the commit request", func(t *testing.T) {
+		cur := &operationCursor{}
+		cur.Set(1)
+		spec := countSpec(1, "commit", "storage-error", 1)
+		spec.Injection = "replace-response"
+		fs := newFaults([]FaultSpec{spec}, cur)
+		h := testhook.New()
+		registerHookFaults(h, fs)
+
+		assert.NoError(t, h.Fail(testhook.Point{Phase: phase("commit")}), "the request goes through")
+		assert.Equal(t, 0, fs[0].Fired())
+		require.Error(t, h.CommitResponse(testhook.Point{Phase: phase("commit")}))
+		assert.Equal(t, 1, fs[0].Fired())
+		assert.NoError(t, h.CommitResponse(testhook.Point{Phase: phase("commit")}))
+	})
 }
