@@ -11,7 +11,7 @@
 
 ## 概要
 
-このライブラリは、CQRS/Event Sourcing 用の同期イベントストアを Memory、DynamoDB、SQLite、Spanner で提供します。
+このライブラリは、CQRS/Event Sourcing 用の同期イベントストアを Memory、DynamoDB、SQLite、Spanner、Bigtable で提供します。
 
 [English](./README.md)
 
@@ -220,6 +220,39 @@ func openSpanner(ctx context.Context, client *gspanner.Client) (eventstore.Event
 
 `TablePrefix` が 5 つの表の名前を導きます。保持件数と方式は、設定の行と一致していなければなりません。変更フィードは設定エラーです。追記は SERIALIZABLE のトランザクションで行い、中断されたら `Config.TransactionRetryLimit` 回（既定は 5）までやり直します。読み取りは強整合の読み取り専用トランザクション 1 つで行います。コミットの応答が失われたときの追記は、結果が分からない保存先エラーで失敗します。
 
+### Bigtable
+
+Bigtable の保存先は、イベントとスナップショットを 1 つの Cloud Bigtable インスタンスの 2 つの表（journal 表と head 表）に保存します。行の形は Rust v5 の実装と同じです。詳しくは [BIGTABLE_DATABASE_SCHEMA.ja.md](docs/BIGTABLE_DATABASE_SCHEMA.ja.md) を参照してください。2 つの表と列ファミリは、`cbt` など管理用のクライアントで自分で作ります。ライブラリは表を作りません。`cloud.google.com/go/bigtable` の `*bigtable.Client` と `*bigtable.AdminClient`（下では `gbigtable` の名前で import します）を渡します。認証、1 つのクラスタに固定した app profile、接続は呼び出し側が設定し、クライアントを閉じるのも呼び出し側です。設定の行は `bigtable.Initialize` で一度だけ書き、初回の起動を含むすべての起動で `bigtable.New` を使ってストアを開きます。上のドメインの型を使うと:
+
+```go
+import (
+    "context"
+    gbigtable "cloud.google.com/go/bigtable"
+    eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
+    "github.com/j5ik2o/event-store-adapter-go/v5/bigtable"
+)
+
+var bigtableConfig = bigtable.Config{JournalTableID: "esa_journal", HeadTableID: "esa_head"}
+
+// Run once, before the first start, while no writer is running. It writes only the two configuration rows.
+func prepareBigtable(ctx context.Context, data *gbigtable.Client) error {
+    keep, err := eventstore.KeepLatest(3)
+    if err != nil { return err }
+    return bigtable.Initialize(ctx, data, bigtableConfig, eventstore.WithRetentionCount(keep))
+}
+
+// Run at every start, the first one included. New verifies the tables and never changes them.
+func openBigtable(ctx context.Context, data *gbigtable.Client, admin *gbigtable.AdminClient) (eventstore.EventStore[orderEvent, orderState], error) {
+    keep, err := eventstore.KeepLatest(3)
+    if err != nil { return nil, err }
+    return bigtable.New(ctx, data, admin, bigtableConfig,
+        eventstore.NewJSONSerializer[orderEvent](), eventstore.NewJSONSerializer[orderState](),
+        eventstore.WithRetentionCount(keep))
+}
+```
+
+どちらかの表に設定の行がすでにあると `Initialize` は設定エラーで失敗するので、一度だけ呼びます。初期化が途中で止まったときの戻し方は、スキーマ文書にあります。保持件数と `Config.EnvelopeLimitBytes` は、設定の行と一致していなければなりません。期限切れ方式と変更フィードは設定エラーです。追記の確定点は head の行への条件付き更新です。その応答が失われたときの追記は、結果が分からない保存先エラーで失敗し、書き込みは繰り返しません。自分の gRPC 接続の上にデータのクライアントを作るときは、`Config.EnvelopeLimitBytes` に行の付加情報（行キーとセルのメタデータ）を足した大きさのメッセージを受け取れるように設定してください（gRPC の既定は 4 MiB です）。
+
 ## 直列化
 
 `Serializer[T]` は payload または集約状態だけを直列化し、封筒の metadata は渡されません。domain 型にライブラリ固有の interface は不要です。`Serialize(value T) ([]byte, error)` と `Deserialize(data []byte) (T, error)` を実装します。
@@ -230,7 +263,7 @@ serializer が返したエラーは `SerializationError`（`KindSerialization`�
 
 ## 保持
 
-保持件数を省略するか `WithRetentionCount(NoRetention())` を渡すと、current snapshot だけを保存して履歴を作りません。`KeepLatest(n)` は `n >= 1` を要求し、current snapshot は件数に含めません。Memory と SQLite は削除方式だけ、DynamoDB は `RetentionDelete`（既定）と `RetentionTTL` に対応します。`WithTTLGraceSeconds` は0以上の猶予秒を指定します。Spanner も `RetentionDelete`（既定）と `RetentionTTL` に対応し、期限切れ方式の猶予は `Config.TTLGraceDays`（日数）で指定します。Spanner で `WithTTLGraceSeconds` に 0 以外を渡すと設定エラーです。
+保持件数を省略するか `WithRetentionCount(NoRetention())` を渡すと、current snapshot だけを保存して履歴を作りません。`KeepLatest(n)` は `n >= 1` を要求し、current snapshot も履歴に入り、`n` 件に数えられるので、最新の `n` 件のスナップショットが残ります。Memory と SQLite は削除方式だけ、DynamoDB は `RetentionDelete`（既定）と `RetentionTTL` に対応します。`WithTTLGraceSeconds` は0以上の猶予秒を指定します。Spanner も `RetentionDelete`（既定）と `RetentionTTL` に対応し、期限切れ方式の猶予は `Config.TTLGraceDays`（日数）で指定します。Spanner で `WithTTLGraceSeconds` に 0 以外を渡すと設定エラーです。Bigtable は削除方式だけに対応します。
 
 保持処理は snapshot と履歴の確定後に同期で行います。失敗はログに記録され、`WithRetentionFailureHandler(func(context.Context, error))` でも通知できます。確定済み書込は成功のまま返ります。
 
@@ -246,7 +279,7 @@ serializer が返したエラーは `SerializationError`（`KindSerialization`�
 
 `conformance/` に共通の適合テストデータ（版 `1.3.0`、[conformance/README.md](conformance/README.md) を参照）を置いています。CI の `lint` ジョブが `tools/conformance/manifest.py verify` と SHA-256 で照合します。
 
-CI の `conformance` ジョブは、`CONFORMANCE_REPORT` を設定して `go test -count=1 -v ./internal/conformance/...` を実行し、`conformance-report.json` を成果物として上げます。実行器は Memory、DynamoDB、SQLite、Spanner の保存先を対象とし、DynamoDB は DynamoDB Local、Spanner は Cloud Spanner エミュレーターをそれぞれコンテナで起動して使い、SQLite はローカルのファイルを使います。実行されなかった SQLite か Spanner の必須ケースがあると、ジョブは失敗します。`CONFORMANCE_REPORT` がなければ、この試験は飛ばされます。
+CI の `conformance` ジョブは、`CONFORMANCE_REPORT` を設定して `go test -count=1 -v ./internal/conformance/...` を実行し、`conformance-report.json` を成果物として上げます。実行器は Memory、DynamoDB、SQLite、Spanner、Bigtable の保存先を対象とし、DynamoDB は DynamoDB Local、Spanner は Cloud Spanner エミュレーター、Bigtable は Cloud Bigtable エミュレーターをそれぞれコンテナで起動して使い、SQLite はローカルのファイルを使います。実行されなかった SQLite・Spanner・Bigtable の必須ケースがあると、ジョブは失敗します。`CONFORMANCE_REPORT` がなければ、この試験は飛ばされます。
 
 ## ライセンス
 

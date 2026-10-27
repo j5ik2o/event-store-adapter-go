@@ -138,6 +138,7 @@ var hookPhases = map[testhook.Phase]bool{
 	testhook.PhaseDeserializeEvent: true, testhook.PhaseDeserializeSnapshot: true,
 	testhook.PhaseCommit: true, testhook.PhaseReadEvents: true, testhook.PhaseReadSnapshot: true,
 	testhook.PhaseRetentionQuery: true, testhook.PhaseRetentionDelete: true,
+	testhook.PhaseJournalWritePrevious: true, testhook.PhaseJournalWriteTail: true,
 }
 
 // registerHookFaults registers on h the faults that go through testhook: storage-error, serialization-error and

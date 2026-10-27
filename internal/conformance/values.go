@@ -1,6 +1,8 @@
 package conformance
 
 import (
+	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +11,7 @@ import (
 	"time"
 
 	eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/bigtableenvelope"
 	"github.com/j5ik2o/event-store-adapter-go/v5/internal/keyhash"
 )
 
@@ -69,6 +72,8 @@ func runValueCase(c ValueCase) CaseResult {
 	case "fnv1a64":
 		input, _ := c.Input.Raw["utf8"].(string)
 		value = fnvValue(input, c.Expect)
+	case "encodeBigtableEventEnvelope", "encodeBigtableSnapshotEnvelope", "decodeBigtableEnvelope":
+		value, err = runBigtableEnvelope(c)
 	default:
 		err = fmt.Errorf("unsupported value operation %q", c.Operation)
 	}
@@ -144,4 +149,68 @@ func fnvValue(input string, expect map[string]any) string {
 		}
 	}
 	return text
+}
+
+// runBigtableEnvelope runs the envelope table of Bigtable (BT-D6a) against the library's own functions. An encoding is
+// returned as lower-case hexadecimal; the expected bytes are then decoded and must give back the input. A decoding
+// returns the error the library reports (a storage error for a malformed envelope).
+func runBigtableEnvelope(c ValueCase) (any, error) {
+	in := c.Input.Raw
+	manifest, _ := in["manifest"].(string)
+	switch c.Operation {
+	case "encodeBigtableEventEnvelope":
+		aid, _ := in["aid"].(string)
+		nanos, err := bigIntFromDecimalString(in["occurred_at_ns"])
+		if err != nil || !nanos.IsInt64() || c.Input.SeqNr == nil || !c.Input.SeqNr.IsUint64() {
+			return nil, fmt.Errorf("the envelope input does not fit the envelope fields")
+		}
+		payload, _ := hex.DecodeString(in["payload_hex"].(string))
+		event := bigtableenvelope.Event{AID: aid, SeqNr: c.Input.SeqNr.Uint64(), OccurredAtNs: nanos.Int64(), Manifest: manifest, Payload: payload}
+		encoded, err := bigtableenvelope.EncodeEvent(event)
+		if err != nil {
+			return nil, err
+		}
+		if want, ok := c.Expect["value"].(string); ok {
+			raw, hexErr := hex.DecodeString(want)
+			if hexErr != nil {
+				return nil, hexErr
+			}
+			back, err := bigtableenvelope.DecodeEvent(raw)
+			if err != nil || back.AID != event.AID || back.SeqNr != event.SeqNr || back.OccurredAtNs != event.OccurredAtNs ||
+				back.Manifest != event.Manifest || !bytes.Equal(back.Payload, event.Payload) {
+				return nil, fmt.Errorf("the expected bytes do not decode to the input: %v", err)
+			}
+		}
+		return hex.EncodeToString(encoded), nil
+	case "encodeBigtableSnapshotEnvelope":
+		if c.Input.SeqNr == nil || !c.Input.SeqNr.IsUint64() {
+			return nil, fmt.Errorf("the envelope input does not fit the envelope fields")
+		}
+		payload, _ := hex.DecodeString(in["payload_hex"].(string))
+		snapshot := bigtableenvelope.Snapshot{SeqNr: c.Input.SeqNr.Uint64(), Manifest: manifest, Payload: payload}
+		encoded, err := bigtableenvelope.EncodeSnapshot(snapshot)
+		if err != nil {
+			return nil, err
+		}
+		if want, ok := c.Expect["value"].(string); ok {
+			raw, hexErr := hex.DecodeString(want)
+			if hexErr != nil {
+				return nil, hexErr
+			}
+			back, err := bigtableenvelope.DecodeSnapshot(raw)
+			if err != nil || back.SeqNr != snapshot.SeqNr || back.Manifest != snapshot.Manifest || !bytes.Equal(back.Payload, snapshot.Payload) {
+				return nil, fmt.Errorf("the expected bytes do not decode to the input: %v", err)
+			}
+		}
+		return hex.EncodeToString(encoded), nil
+	default:
+		raw, _ := hex.DecodeString(in["bytes_hex"].(string))
+		var err error
+		if in["kind"] == "event" {
+			_, err = bigtableenvelope.DecodeEvent(raw)
+		} else {
+			_, err = bigtableenvelope.DecodeSnapshot(raw)
+		}
+		return nil, err
+	}
 }

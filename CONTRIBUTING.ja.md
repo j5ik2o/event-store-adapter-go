@@ -23,7 +23,7 @@
 
 - Go: `go.mod` は `go 1.26.0` と `toolchain go1.27.3` を宣言しています。CI は Go 1.27 を使います（`actions/setup-go`）。
 - Python 3: CI は Python 3.15 で、`tools/` 以下のスクリプトと `.github/` 以下の試験を実行します。 `tools/user-docs/check.py` は Python 3.10 以上が必要です。
-- Docker: `make test` は `./...` を実行し、`internal/dynamodbtest` の試験を含みます。この試験は testcontainers-go で DynamoDB Local のコンテナを起動します。DynamoDB の適合の実行器も DynamoDB Local のコンテナを使います。SQLite の試験（`sqlite/` と適合の実行器の SQLite の部分）にコンテナは要りません。一時ディレクトリの SQLite ファイルと、cgo を使わない Go のドライバー `modernc.org/sqlite` を使うので、cgo もエミュレーターも不要です。Spanner の試験（`spanner/`、`internal/spannertest`、適合の実行器の Spanner の部分）は、testcontainers-go で Cloud Spanner エミュレーターのコンテナを起動します。イメージは `internal/spannertest/environment.go` で digest により固定しています。エミュレーターが起動しなくても試験は飛ばされず、失敗します。
+- Docker: `make test` は `./...` を実行し、`internal/dynamodbtest` の試験を含みます。この試験は testcontainers-go で DynamoDB Local のコンテナを起動します。DynamoDB の適合の実行器も DynamoDB Local のコンテナを使います。SQLite の試験（`sqlite/` と適合の実行器の SQLite の部分）にコンテナは要りません。一時ディレクトリの SQLite ファイルと、cgo を使わない Go のドライバー `modernc.org/sqlite` を使うので、cgo もエミュレーターも不要です。Spanner の試験（`spanner/`、`internal/spannertest`、適合の実行器の Spanner の部分）は、testcontainers-go で Cloud Spanner エミュレーターのコンテナを起動します。イメージは `internal/spannertest/environment.go` で digest により固定しています。エミュレーターが起動しなくても試験は飛ばされず、失敗します。Bigtable の試験（`bigtable/`、`internal/bigtabletest`、`internal/bigtableenvelope`、適合の実行器の Bigtable の部分）は、同じ方法で Cloud Bigtable エミュレーターを起動します。イメージは `internal/bigtabletest/environment.go` で digest により固定し、試験は明示的に接続します（`BIGTABLE_EMULATOR_HOST` は設定しません）。
 - 依存は `make prepare`（`go mod download`）で取得します。
 - 道具は `make install-tools`（staticcheck と goimports。どちらも `@latest`）または `bash setup.sh`（staticcheck の `@latest`）で入れます。CI は staticcheck を `v0.8.2` に固定しています。
 
@@ -36,7 +36,7 @@ CI（`.github/workflows/ci.yml`）は次を実行します。変更提案を出�
 | `lint` | `python3 tools/conformance/manifest.py verify`、上に挙げた共通ファイルの SHA-256 の照合、`python3 tools/user-docs/check.py`、`make vet`（`go vet ./...`）、`go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...` |
 | `test` | `make test`（`go test -race -v ./...`） |
 | `release-checks` | `python3 -m unittest discover -s .github -p 'test_*.py' -v`、`go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7` と `actionlint` |
-| `conformance` | 環境変数 `CONFORMANCE_REPORT` に報告ファイルのパスを設定して `go test -count=1 -v ./internal/conformance/...`（未設定のときは試験が飛ばされます）。Memory、DynamoDB、SQLite、Spanner の保存先を実行し、`internal/conformance/required.json` が各保存先で成功すべきケースを挙げます。挙げたケースが実行されなければ、ジョブは失敗します |
+| `conformance` | 環境変数 `CONFORMANCE_REPORT` に報告ファイルのパスを設定して `go test -count=1 -v ./internal/conformance/...`（未設定のときは試験が飛ばされます）。Memory、DynamoDB、SQLite、Spanner、Bigtable の保存先を実行し、`internal/conformance/required.json` が各保存先で成功すべきケースを挙げます。挙げたケースが実行されなければ、ジョブは失敗します |
 
 `Makefile` のその他のコマンド:
 

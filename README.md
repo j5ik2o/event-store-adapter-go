@@ -9,7 +9,7 @@
 
 ## Overview
 
-This library provides a synchronous event store for CQRS/Event Sourcing with Memory, DynamoDB, SQLite and Spanner backends.
+This library provides a synchronous event store for CQRS/Event Sourcing with Memory, DynamoDB, SQLite, Spanner and Bigtable backends.
 
 [日本語](./README.ja.md)
 
@@ -216,6 +216,39 @@ func openSpanner(ctx context.Context, client *gspanner.Client) (eventstore.Event
 
 `TablePrefix` derives the five table names. The retention count and mode must agree with the configuration row. A change feed is a configuration error. Appends run in SERIALIZABLE transactions and are re-run after an abort up to `Config.TransactionRetryLimit` times (default 5); reads use one strongly consistent read-only transaction. If the response of a commit is lost, the append fails with a storage error whose outcome is unknown.
 
+### Bigtable
+
+The Bigtable storage keeps events and snapshots in two tables of one Cloud Bigtable instance, a journal table and a head table, in the same row format as the Rust v5 implementation; see [BIGTABLE_DATABASE_SCHEMA.md](docs/BIGTABLE_DATABASE_SCHEMA.md). You create the two tables and their column families yourself with `cbt` (or any admin client); the library never creates tables. Supply a `*bigtable.Client` and a `*bigtable.AdminClient` from `cloud.google.com/go/bigtable` (imported as `gbigtable` below), which you configure (authentication, an app profile pinned to one cluster, the connection) and close yourself. The configuration rows are written once by `bigtable.Initialize`; every start, the first one included, then opens the store with `bigtable.New`. With the domain types above:
+
+```go
+import (
+    "context"
+    gbigtable "cloud.google.com/go/bigtable"
+    eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
+    "github.com/j5ik2o/event-store-adapter-go/v5/bigtable"
+)
+
+var bigtableConfig = bigtable.Config{JournalTableID: "esa_journal", HeadTableID: "esa_head"}
+
+// Run once, before the first start, while no writer is running. It writes only the two configuration rows.
+func prepareBigtable(ctx context.Context, data *gbigtable.Client) error {
+    keep, err := eventstore.KeepLatest(3)
+    if err != nil { return err }
+    return bigtable.Initialize(ctx, data, bigtableConfig, eventstore.WithRetentionCount(keep))
+}
+
+// Run at every start, the first one included. New verifies the tables and never changes them.
+func openBigtable(ctx context.Context, data *gbigtable.Client, admin *gbigtable.AdminClient) (eventstore.EventStore[orderEvent, orderState], error) {
+    keep, err := eventstore.KeepLatest(3)
+    if err != nil { return nil, err }
+    return bigtable.New(ctx, data, admin, bigtableConfig,
+        eventstore.NewJSONSerializer[orderEvent](), eventstore.NewJSONSerializer[orderState](),
+        eventstore.WithRetentionCount(keep))
+}
+```
+
+`Initialize` fails with a configuration error when either table already has a configuration row, so call it only once; the schema document explains how to recover from an interrupted initialization. The retention count and `Config.EnvelopeLimitBytes` must agree with the configuration rows. TTL retention and a change feed are configuration errors. The commit point of an append is a conditional write on the head row; if its response is lost, the append fails with a storage error whose outcome is unknown and the write is not repeated. A data client built over your own gRPC connection must allow received messages as large as `Config.EnvelopeLimitBytes` plus the row overhead (row key and cell metadata), because the default gRPC limit is 4 MiB.
+
 ## Serialization
 
 `Serializer[T]` serializes only the payload or the aggregate state; envelope metadata is not passed to it. Domain types need no library-specific interface. Implement `Serialize(value T) ([]byte, error)` and `Deserialize(data []byte) (T, error)`.
@@ -226,7 +259,7 @@ An error returned by a serializer is classified as `SerializationError` (`KindSe
 
 ## Retention
 
-Omitting the retention count, or supplying `WithRetentionCount(NoRetention())`, keeps the current snapshot without history. `KeepLatest(n)` requires `n >= 1`; current snapshots do not count toward `n`. Memory and SQLite support delete retention only. DynamoDB supports `RetentionDelete` (default) and `RetentionTTL`, with `WithTTLGraceSeconds` specifying a non-negative grace period in seconds. Spanner supports `RetentionDelete` (default) and `RetentionTTL`; its TTL grace period is `Config.TTLGraceDays` in days, and a non-zero `WithTTLGraceSeconds` is a configuration error there.
+Omitting the retention count, or supplying `WithRetentionCount(NoRetention())`, keeps the current snapshot without history. `KeepLatest(n)` requires `n >= 1`; the current snapshot is also stored in the history and counts toward `n`, so the newest `n` snapshots are kept. Memory and SQLite support delete retention only. DynamoDB supports `RetentionDelete` (default) and `RetentionTTL`, with `WithTTLGraceSeconds` specifying a non-negative grace period in seconds. Spanner supports `RetentionDelete` (default) and `RetentionTTL`; its TTL grace period is `Config.TTLGraceDays` in days, and a non-zero `WithTTLGraceSeconds` is a configuration error there. Bigtable supports delete retention only.
 
 Retention runs synchronously after a successful snapshot/history write. Failure is logged and can also be observed through `WithRetentionFailureHandler(func(context.Context, error))`; the committed write still returns success.
 
@@ -242,7 +275,7 @@ See [DYNAMODB_DATABASE_SCHEMA.md](docs/DYNAMODB_DATABASE_SCHEMA.md) for attribut
 
 The `conformance/` directory holds the shared conformance data (version `1.3.0`, see [conformance/README.md](conformance/README.md)). The `lint` job in CI verifies it with `tools/conformance/manifest.py verify` and SHA-256 checks.
 
-The `conformance` job in CI runs `go test -count=1 -v ./internal/conformance/...` with `CONFORMANCE_REPORT` set, and uploads `conformance-report.json` as an artifact. The runner covers the Memory, DynamoDB, SQLite and Spanner storages; DynamoDB uses DynamoDB Local and Spanner uses the Cloud Spanner emulator, each started in a container, and SQLite uses local files. A required SQLite or Spanner case that is not executed fails the job. Without `CONFORMANCE_REPORT`, the test is skipped.
+The `conformance` job in CI runs `go test -count=1 -v ./internal/conformance/...` with `CONFORMANCE_REPORT` set, and uploads `conformance-report.json` as an artifact. The runner covers the Memory, DynamoDB, SQLite, Spanner and Bigtable storages; DynamoDB uses DynamoDB Local, Spanner uses the Cloud Spanner emulator and Bigtable uses the Cloud Bigtable emulator, each started in a container, and SQLite uses local files. A required SQLite, Spanner or Bigtable case that is not executed fails the job. Without `CONFORMANCE_REPORT`, the test is skipped.
 
 ## License
 

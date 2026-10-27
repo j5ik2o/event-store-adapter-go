@@ -15,22 +15,33 @@ func TestLoadRequired(t *testing.T) {
 		require.NoError(t, err)
 		d, err := LoadData(dataRoot())
 		require.NoError(t, err)
-		assert.Len(t, req, 4)
+		assert.Len(t, req, 5)
 		assert.Len(t, req["memory"], 67)
 		assert.Len(t, req["dynamodb"], 106)
 		assert.Len(t, req["sqlite"], 68)
 		assert.Len(t, req["spanner"], 79)
+		assert.Len(t, req["bigtable"], 87)
 		require.NoError(t, CheckRequiredCoverage(d, req))
-		deleteOne := RequiredList{"memory": req["memory"][1:], "dynamodb": req["dynamodb"], "sqlite": req["sqlite"], "spanner": req["spanner"]}
+		deleteOne := RequiredList{"memory": req["memory"][1:], "dynamodb": req["dynamodb"], "sqlite": req["sqlite"], "spanner": req["spanner"], "bigtable": req["bigtable"]}
 		require.Error(t, CheckRequiredCoverage(d, deleteOne))
-		addExcluded := RequiredList{"memory": append(append([]string{}, req["memory"]...), "fnv-empty"), "dynamodb": req["dynamodb"], "sqlite": req["sqlite"], "spanner": req["spanner"]}
+		addExcluded := RequiredList{"memory": append(append([]string{}, req["memory"]...), "fnv-empty"), "dynamodb": req["dynamodb"], "sqlite": req["sqlite"], "spanner": req["spanner"], "bigtable": req["bigtable"]}
 		require.Error(t, CheckRequiredCoverage(d, addExcluded))
-		deleteSqlite := RequiredList{"memory": req["memory"], "dynamodb": req["dynamodb"], "sqlite": req["sqlite"][1:], "spanner": req["spanner"]}
+		deleteSqlite := RequiredList{"memory": req["memory"], "dynamodb": req["dynamodb"], "sqlite": req["sqlite"][1:], "spanner": req["spanner"], "bigtable": req["bigtable"]}
 		require.Error(t, CheckRequiredCoverage(d, deleteSqlite), "a missing SQLite case must stop the gate")
-		deleteSpanner := RequiredList{"memory": req["memory"], "dynamodb": req["dynamodb"], "sqlite": req["sqlite"], "spanner": req["spanner"][1:]}
+		deleteSpanner := RequiredList{"memory": req["memory"], "dynamodb": req["dynamodb"], "sqlite": req["sqlite"], "spanner": req["spanner"][1:], "bigtable": req["bigtable"]}
 		require.Error(t, CheckRequiredCoverage(d, deleteSpanner), "a missing Spanner case must stop the gate")
-		emptySpanner := RequiredList{"memory": req["memory"], "dynamodb": req["dynamodb"], "sqlite": req["sqlite"], "spanner": {}}
+		emptySpanner := RequiredList{"memory": req["memory"], "dynamodb": req["dynamodb"], "sqlite": req["sqlite"], "spanner": {}, "bigtable": req["bigtable"]}
 		require.Error(t, CheckRequiredCoverage(d, emptySpanner), "an empty Spanner list must not pass")
+		deleteBigtable := RequiredList{"memory": req["memory"], "dynamodb": req["dynamodb"], "sqlite": req["sqlite"], "spanner": req["spanner"], "bigtable": req["bigtable"][1:]}
+		require.Error(t, CheckRequiredCoverage(d, deleteBigtable), "a missing Bigtable case must stop the gate")
+		emptyBigtable := RequiredList{"memory": req["memory"], "dynamodb": req["dynamodb"], "sqlite": req["sqlite"], "spanner": req["spanner"], "bigtable": {}}
+		require.Error(t, CheckRequiredCoverage(d, emptyBigtable), "an empty Bigtable list must not pass")
+		for _, id := range []string{"bigtable-envelope-event-empty", "bigtable-envelope-event-length-mismatch", "hash-fnv1a64-1", "store-shared-persistent"} {
+			assert.Contains(t, req["bigtable"], id)
+		}
+		for _, name := range []string{"memory", "dynamodb", "sqlite", "spanner"} {
+			assert.NotContains(t, req[name], "bigtable-envelope-event-empty", "the envelope table runs only for Bigtable")
+		}
 		for _, id := range []string{"sqlite-ttl-unsupported", "sqlite-change-feed-unsupported", "sqlite-write-lock-busy", "store-shared-persistent"} {
 			assert.Contains(t, req["sqlite"], id)
 		}
@@ -49,21 +60,23 @@ func TestLoadRequired(t *testing.T) {
 		return p
 	}
 
-	t.Run("key set must be exactly memory, dynamodb, sqlite and spanner", func(t *testing.T) {
+	t.Run("key set must be exactly memory, dynamodb, sqlite, spanner and bigtable", func(t *testing.T) {
 		_, err := LoadRequired(write(t, `{"memory": []}`))
 		assert.Error(t, err)
 		_, err = LoadRequired(write(t, `{"memory": [], "dynamodb": []}`))
 		assert.Error(t, err, "sqlite is required")
 		_, err = LoadRequired(write(t, `{"memory": [], "dynamodb": [], "sqlite": []}`))
 		assert.Error(t, err, "spanner is required")
-		_, err = LoadRequired(write(t, `{"memory": [], "dynamodb": [], "sqlite": [], "spanner": [], "other": []}`))
-		assert.Error(t, err)
 		_, err = LoadRequired(write(t, `{"memory": [], "dynamodb": [], "sqlite": [], "spanner": []}`))
+		assert.Error(t, err, "bigtable is required")
+		_, err = LoadRequired(write(t, `{"memory": [], "dynamodb": [], "sqlite": [], "spanner": [], "bigtable": [], "other": []}`))
+		assert.Error(t, err)
+		_, err = LoadRequired(write(t, `{"memory": [], "dynamodb": [], "sqlite": [], "spanner": [], "bigtable": []}`))
 		assert.NoError(t, err)
 	})
 
 	t.Run("duplicate id is rejected", func(t *testing.T) {
-		_, err := LoadRequired(write(t, `{"memory": ["a","a"], "dynamodb": [], "sqlite": [], "spanner": []}`))
+		_, err := LoadRequired(write(t, `{"memory": ["a","a"], "dynamodb": [], "sqlite": [], "spanner": [], "bigtable": []}`))
 		assert.Error(t, err)
 	})
 
@@ -76,7 +89,7 @@ func TestLoadRequired(t *testing.T) {
 func TestRequiredCoreValues(t *testing.T) {
 	d, err := LoadData(dataRoot())
 	require.NoError(t, err)
-	req := RequiredList{"memory": {}, "dynamodb": {}, "sqlite": {}, "spanner": {}}
+	req := RequiredList{"memory": {}, "dynamodb": {}, "sqlite": {}, "spanner": {}, "bigtable": {}}
 	for _, c := range d.Values {
 		if c.Operation == "buildAid" || c.Operation == "validateSeqNr" {
 			for _, name := range requiredBackends {
@@ -178,18 +191,18 @@ func TestEvaluateRequired(t *testing.T) {
 			{ID: "sp-skipped", Status: Status("unverified"), Reason: "r", Backend: "spanner"},
 			{ID: "sp-failed", Status: Status("failure"), Reason: "r", Backend: "spanner"},
 		}
-		g, err := EvaluateRequired(RequiredList{"memory": {}, "dynamodb": {}, "sqlite": {}, "spanner": {"sp-ok"}}, spannerResults)
+		g, err := EvaluateRequired(RequiredList{"memory": {}, "dynamodb": {}, "sqlite": {}, "spanner": {"sp-ok"}, "bigtable": {}}, spannerResults)
 		require.NoError(t, err)
 		assert.Empty(t, g.Violations)
 
-		g, err = EvaluateRequired(RequiredList{"memory": {}, "dynamodb": {}, "sqlite": {}, "spanner": {"sp-ok", "sp-skipped", "sp-failed"}}, spannerResults)
+		g, err = EvaluateRequired(RequiredList{"memory": {}, "dynamodb": {}, "sqlite": {}, "spanner": {"sp-ok", "sp-skipped", "sp-failed"}, "bigtable": {}}, spannerResults)
 		require.NoError(t, err)
 		require.Len(t, g.Violations, 2)
 		for _, violation := range g.Violations {
 			assert.Contains(t, violation, "spanner")
 		}
 
-		_, err = EvaluateRequired(RequiredList{"memory": {}, "dynamodb": {}, "sqlite": {}, "spanner": {"sp-not-run"}}, spannerResults)
+		_, err = EvaluateRequired(RequiredList{"memory": {}, "dynamodb": {}, "sqlite": {}, "spanner": {"sp-not-run"}, "bigtable": {}}, spannerResults)
 		assert.Error(t, err, "a required case that was never executed must stop the gate: the CI fails")
 	})
 	t.Run("a required sqlite case that did not succeed is a violation naming sqlite", func(t *testing.T) {
@@ -244,4 +257,29 @@ func TestEvaluateRequired_ValueCases(t *testing.T) {
 		_, err := EvaluateRequired(RequiredList{"memory": {"ghost"}, "dynamodb": {}}, results)
 		assert.Error(t, err)
 	})
+}
+
+func TestEvaluateRequiredBigtable(t *testing.T) {
+	results := []CaseResult{
+		{ID: "bt-ok", Status: Status("success"), Reason: "r", Backend: "bigtable"},
+		{ID: "bt-skipped", Status: Status("unverified"), Reason: "r", Backend: "bigtable"},
+		{ID: "bt-failed", Status: Status("failure"), Reason: "r", Backend: "bigtable"},
+	}
+	base := func(ids ...string) RequiredList {
+		return RequiredList{"memory": {}, "dynamodb": {}, "sqlite": {}, "spanner": {}, "bigtable": ids}
+	}
+
+	g, err := EvaluateRequired(base("bt-ok"), results)
+	require.NoError(t, err)
+	assert.Empty(t, g.Violations)
+
+	g, err = EvaluateRequired(base("bt-ok", "bt-skipped", "bt-failed"), results)
+	require.NoError(t, err)
+	require.Len(t, g.Violations, 2)
+	for _, violation := range g.Violations {
+		assert.Contains(t, violation, "bigtable")
+	}
+
+	_, err = EvaluateRequired(base("bt-not-run"), results)
+	assert.Error(t, err, "a required Bigtable case that was not run stops the gate")
 }

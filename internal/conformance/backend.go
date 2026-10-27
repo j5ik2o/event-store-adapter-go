@@ -10,7 +10,7 @@ import (
 // Backend is the boundary between the runner and a storage backend. It creates stores for
 // scenarios. Actual adapters live in the external test package.
 type Backend interface {
-	// Name is "memory", "dynamodb", "sqlite" or "spanner".
+	// Name is "memory", "dynamodb", "sqlite", "spanner" or "bigtable".
 	Name() string
 	// Injectable tells whether the backend can inject the fault. A scenario with a fault
 	// that cannot be injected is reported as unverified.
@@ -95,6 +95,8 @@ type StoreConfig struct {
 	TTLGraceDays *int64
 	// TransactionRetryLimit is the number of re-runs of a Spanner transaction after an abort (the first attempt is not counted).
 	TransactionRetryLimit *int64
+	// EnvelopeLimitBytes is the envelope size limit of a Bigtable store (envelope_limit_bytes). It is nil when the key is absent.
+	EnvelopeLimitBytes *int64
 	// ChangeFeed asks for a change feed. An absent key means false.
 	ChangeFeed bool
 	// LockWaitMilliseconds is the busy wait of a SQLite store. It is nil when the key is absent.

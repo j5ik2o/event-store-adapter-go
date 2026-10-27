@@ -24,12 +24,17 @@ const (
 	PhaseRetentionMark       Phase = "retention-mark"
 	PhaseConfigurationRead   Phase = "configuration-read"
 	PhaseConfigurationCreate Phase = "configuration-create"
+	// PhaseJournalWritePrevious is the write-out of the head's last event to its journal row before the head advances.
+	PhaseJournalWritePrevious Phase = "journal-write-previous"
+	// PhaseJournalWriteTail is the write-out of the newly committed event after the commit point.
+	PhaseJournalWriteTail Phase = "journal-write-tail"
 )
 
 var phases = []Phase{
 	PhaseSerializeEvent, PhaseSerializeSnapshot, PhaseDeserializeEvent, PhaseDeserializeSnapshot,
 	PhaseCommit, PhaseReadEvents, PhaseReadSnapshot, PhaseRetentionQuery, PhaseRetentionDelete,
 	PhaseRetentionMark, PhaseConfigurationRead, PhaseConfigurationCreate,
+	PhaseJournalWritePrevious, PhaseJournalWriteTail,
 }
 
 // Phases returns every known phase.
@@ -99,6 +104,7 @@ type Hooks struct {
 	response    []FailHook
 	historyPage HistoryPagesHook
 	history     HistoryReader
+	keyHash     KeyHashHook
 }
 
 // New returns an empty Hooks.
@@ -237,4 +243,28 @@ func (h *Hooks) CommitResponse(pt Point) error {
 		}
 	}
 	return nil
+}
+
+// KeyHashHook replaces the row-key hash of an aggregate. ok is false when the hook keeps the real hash.
+type KeyHashHook func(aid string) (hash uint64, ok bool)
+
+// OnKeyHash registers the hook that replaces the row-key hash, to force collisions that FNV-1a 64 cannot produce on demand.
+func (h *Hooks) OnKeyHash(f KeyHashHook) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.keyHash = f
+}
+
+// KeyHash calls the registered hook. ok is false when there is none or when it keeps the real hash.
+func (h *Hooks) KeyHash(aid string) (uint64, bool) {
+	if h == nil {
+		return 0, false
+	}
+	h.mu.RLock()
+	f := h.keyHash
+	h.mu.RUnlock()
+	if f == nil {
+		return 0, false
+	}
+	return f(aid)
 }

@@ -17,7 +17,7 @@ This library follows [common contract v5](https://github.com/j5ik2o/event-store-
 3. Implement `AggregateID` using `TypeName()` and `Value()`. Remove `AsString`, KeyResolver and shard configuration. Type names cannot contain `-`; the resulting ID has a 1024-byte UTF-8 limit.
 4. Use arbitrary event/state types and `Serializer[T]` (for example `NewJSONSerializer[T]()`). Remove Event/Aggregate interfaces and map converters. Put metadata in validated `NewEventEnvelope`/`NewSnapshotEnvelope` values; optional manifest is specified with `WithManifest`.
 5. Remove version arguments, version comparison and `IsCreated`. Assign consecutive event numbers starting at 1. A pair write requires the same event and snapshot number; the previous head is inferred from the event number.
-6. Use `memory.NewStore` then `memory.New`, `sqlite.Initialize`, `sqlite.Open` then `sqlite.New`, or `dynamodb.New` with `Config` naming distinct journal/snapshot/head tables and the history index, or `spanner.New` with a `Config` naming the table prefix of an externally provisioned layout. Settings are supplied through `Option`. No history is the default or `NoRetention()`; positive `KeepLatest(n)` replaces keep-snapshot options. Zero is a configuration error, not a history count. Memory and SQLite reject TTL mode; DynamoDB accepts `RetentionTTL` and non-negative `WithTTLGraceSeconds`.
+6. Use `memory.NewStore` then `memory.New`, `sqlite.Initialize`, `sqlite.Open` then `sqlite.New`, or `dynamodb.New` with `Config` naming distinct journal/snapshot/head tables and the history index, or `spanner.New` with a `Config` naming the table prefix of an externally provisioned layout, or `bigtable.Initialize` once and then `bigtable.New` with a `Config` naming the journal and head tables. Settings are supplied through `Option`. No history is the default or `NoRetention()`; positive `KeepLatest(n)` replaces keep-snapshot options. Zero is a configuration error, not a history count. Memory and SQLite reject TTL mode; DynamoDB accepts `RetentionTTL` and non-negative `WithTTLGraceSeconds`.
 7. Handle the five error kinds with `KindOf`/`errors.As`, and preserve causes through `Unwrap`. Retention failure logs/notifications do not undo a successful write.
 
 Restoration begins at the snapshot's next event, or at 1 without a snapshot. An absent head returns nil. Do not use `HeadSeqNr` as the starting position; it can differ from the snapshot number, especially during concurrent DynamoDB reads.
@@ -69,6 +69,15 @@ The Go library before v5 had no Spanner storage, so there is no old Spanner data
 1. Create the five tables and the single configuration row outside the application, with the DDL and the `INSERT` of [SPANNER_DATABASE_SCHEMA](SPANNER_DATABASE_SCHEMA.md) for the retention mode you will use. The library never runs DDL.
 2. In the application, create a `*spanner.Client` and call `spanner.New` with the same retention option and, for TTL retention, `Config.TTLGraceDays`. Call it in the same way at the first start and at every restart; there is nothing to initialize from the program.
 3. To move data from another storage, read the events there and write them through the new API with consecutive numbers starting at 1, as in the steps above. A destination written by the JavaScript v5 implementation can be opened directly.
+
+### Bigtable
+
+The Go library before v5 had no Bigtable storage, so there is no old Bigtable data to migrate and this repository provides no Bigtable migration tool. To adopt Bigtable, start from two new tables:
+
+1. Create the journal and head tables and their column families outside the application, with the `cbt` commands of [BIGTABLE_DATABASE_SCHEMA](BIGTABLE_DATABASE_SCHEMA.md). The library never creates tables.
+2. Once, while no writer is running, call `bigtable.Initialize` with the retention option you will use later. It writes only the two configuration rows and fails with a configuration error if either table already has one.
+3. In the application, create a `*bigtable.Client` and a `*bigtable.AdminClient` and call `bigtable.New` with the same retention option and `Config`. Call it in the same way at the first start and at every restart. If an initialization stops halfway, follow the recovery procedure of the schema document.
+4. To move data from another storage, read the events there and write them through the new API with consecutive numbers starting at 1, as in the steps above. A pair of tables written by the Rust v5 implementation can be opened directly.
 
 ## Verification and cutover
 

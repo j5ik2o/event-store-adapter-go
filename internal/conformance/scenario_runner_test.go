@@ -704,6 +704,14 @@ func TestRunScenario_ChangeFeed(t *testing.T) {
 		assert.Equal(t, int32(1), b.opens, "a change feed request must reach the spanner backend instead of being reported as unrepresentable")
 	})
 
+	t.Run("bigtable runs a change feed request and opens the store so the backend can reject it", func(t *testing.T) {
+		b := &fakeBackend{name: "bigtable", injectable: true}
+		c := mkCase(t, withStore(`{"retention_count":null,"retention_mode":"delete","change_feed":true}`))
+		r := runScenario(ctx, c, "bigtable", b)
+		assert.NotEqual(t, StatusUnrepresentable, r.Status, r.Reason)
+		assert.Equal(t, int32(1), b.opens, "a change feed request must reach the bigtable backend instead of being reported as unrepresentable")
+	})
+
 	t.Run("a missing change_feed means false and the scenario runs", func(t *testing.T) {
 		b := &fakeBackend{name: "memory", injectable: true}
 		c := mkCase(t, scenarioBody("", "", persistOK))
@@ -733,123 +741,90 @@ func TestRunScenario_ChangeFeed(t *testing.T) {
 	})
 }
 
-func outOfScopeFile(file string) bool {
-	for _, dir := range []string{"bigtable/", "values/bigtable-envelope.json"} {
-		if strings.HasPrefix(file, dir) {
-			return true
-		}
-	}
-	return false
-}
-
-func TestRunBackend_OutOfScope(t *testing.T) {
+func TestRunBackend_BigtableCasesAreInScope(t *testing.T) {
 	ctx := context.Background()
 	d, err := LoadData(dataRoot())
 	require.NoError(t, err)
 
-	outOfScopeIDs := map[string]bool{}
+	bigtableIDs := map[string]bool{}
 	for _, c := range d.Scenarios {
-		if outOfScopeFile(c.File) {
-			outOfScopeIDs[c.ID] = true
+		if contains(c.Backends, "bigtable") {
+			bigtableIDs[c.ID] = true
 		}
 	}
+	envelopeIDs := map[string]bool{}
 	for _, v := range d.Values {
-		if outOfScopeFile(v.File) {
-			outOfScopeIDs[v.ID] = true
+		if v.File == "values/bigtable-envelope.json" {
+			envelopeIDs[v.ID] = true
 		}
 	}
-	require.NotEmpty(t, outOfScopeIDs)
+	require.Len(t, envelopeIDs, 10)
+	require.NotEmpty(t, bigtableIDs)
 
-	for _, name := range []string{"memory", "dynamodb"} {
-		name := name
-		t.Run(name+" reports the cases of unprovided storages as not applicable with a reason", func(t *testing.T) {
-			results := RunBackend(ctx, d, &fakeBackend{name: name})
-			seen := 0
-			for _, r := range results {
-				if !outOfScopeIDs[r.ID] {
-					continue
-				}
-				seen++
-				assert.Equal(t, StatusNotApplicable, r.Status, r.ID)
-				assert.Contains(t, r.Reason, "提供しない", r.ID)
-				assert.Equal(t, name, r.Backend, r.ID)
-			}
-			assert.Equal(t, len(outOfScopeIDs), seen)
-		})
-
-		t.Run(name+" counts them as neither success nor failure in the rule report", func(t *testing.T) {
-			results := RunBackend(ctx, d, &fakeBackend{name: name})
-			rep := BuildReport(ManifestResult{Verified: true}, results, nil, GateResult{}, nil)
-			var checked int
-			for rule, counts := range rep.Rules {
-				if !strings.HasPrefix(rule, "BT-") {
-					continue
-				}
-				checked++
-				assert.Zero(t, counts[StatusSuccess], rule)
-				assert.Zero(t, counts[StatusFailure], rule)
-				assert.Zero(t, counts[StatusUnverified], rule)
-				assert.Zero(t, counts[StatusUnrepresentable], rule)
-				assert.Positive(t, counts[StatusNotApplicable], rule)
-			}
-			assert.Positive(t, checked)
-			require.Contains(t, rep.Rules, "BT-D6a")
-			assert.Positive(t, rep.Rules["BT-D6a"][StatusNotApplicable])
-		})
-	}
-
-	for _, name := range []string{"memory", "dynamodb", "sqlite"} {
-		name := name
-		t.Run(name+" reports the Spanner-only cases as not applicable because the storage is not in their backends", func(t *testing.T) {
-			results := RunBackend(ctx, d, &fakeBackend{name: name})
-			seen := 0
-			for _, r := range results {
-				if !strings.HasPrefix(r.ID, "spanner-") {
-					continue
-				}
-				seen++
-				assert.Equal(t, StatusNotApplicable, r.Status, r.ID)
-				assert.NotEmpty(t, r.Reason, r.ID)
-			}
-			assert.Equal(t, 14, seen)
-		})
-	}
-
-	t.Run("MEM-2 includes the shared configuration case", func(t *testing.T) {
-		results := RunBackend(ctx, d, &fakeBackend{name: "memory"})
-		var ids []string
+	t.Run("the envelope value cases run for Bigtable and are never reported as unprovided", func(t *testing.T) {
+		results := RunBackend(ctx, d, &fakeBackend{name: "bigtable"})
+		seen := 0
 		for _, r := range results {
-			for _, rule := range r.Rules {
-				if rule == "MEM-2" {
-					ids = append(ids, r.ID)
+			if !envelopeIDs[r.ID] {
+				continue
+			}
+			seen++
+			assert.NotEqual(t, StatusNotApplicable, r.Status, "%s: %s", r.ID, r.Reason)
+			assert.NotContains(t, r.Reason, "提供しない", r.ID)
+		}
+		assert.Equal(t, 10, seen)
+	})
+
+	t.Run("Bigtable scenarios are run for Bigtable, not excluded for being unprovided", func(t *testing.T) {
+		results := RunBackend(ctx, d, &fakeBackend{name: "bigtable"})
+		seen := 0
+		for _, r := range results {
+			if !bigtableIDs[r.ID] {
+				continue
+			}
+			seen++
+			assert.NotContains(t, r.Reason, "提供しない", r.ID)
+		}
+		assert.Equal(t, len(bigtableIDs), seen)
+	})
+
+	for _, name := range []string{"memory", "dynamodb", "sqlite", "spanner"} {
+		t.Run(name+" excludes the Bigtable-only cases because the storage is not in their backends", func(t *testing.T) {
+			results := RunBackend(ctx, d, &fakeBackend{name: name})
+			for _, r := range results {
+				if envelopeIDs[r.ID] {
+					assert.Equal(t, StatusNotApplicable, r.Status, r.ID)
+					assert.NotEmpty(t, r.Reason, r.ID)
+				}
+			}
+		})
+	}
+
+	t.Run("the applicable set of Bigtable is the 87 required cases and contains the envelope values", func(t *testing.T) {
+		applicable := ApplicableCases(d, "bigtable")
+		assert.Len(t, applicable, 87)
+		for id := range envelopeIDs {
+			assert.Contains(t, applicable, id)
+			assert.NotContains(t, ApplicableCases(d, "memory"), id)
+		}
+	})
+
+	t.Run("fnv1a64 values run for Spanner and Bigtable only", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			runs bool
+		}{{"spanner", true}, {"bigtable", true}, {"memory", false}, {"dynamodb", false}, {"sqlite", false}} {
+			results := RunBackend(ctx, d, &fakeBackend{name: tc.name})
+			for _, r := range results {
+				if !strings.HasPrefix(r.ID, "hash-fnv1a64") && !strings.HasPrefix(r.ID, "fnv1a64") {
+					continue
+				}
+				if tc.runs {
+					assert.NotEqual(t, StatusNotApplicable, r.Status, "%s %s", tc.name, r.ID)
+				} else {
+					assert.Equal(t, StatusNotApplicable, r.Status, "%s %s", tc.name, r.ID)
 				}
 			}
 		}
-		assert.Contains(t, ids, "memory-store-shared-configuration")
-	})
-
-	t.Run("they are not required cases", func(t *testing.T) {
-		for _, name := range []string{"memory", "dynamodb"} {
-			for _, id := range ApplicableCases(d, name) {
-				assert.False(t, outOfScopeIDs[id], "%s: %s", name, id)
-			}
-		}
-	})
-}
-
-func TestRunScenario_OutOfScopeWithoutPlan(t *testing.T) {
-	c := ScenarioCase{ID: "sqlite-case", Rules: []string{"SQ-1"}, Backends: []string{"sqlite"}, OutOfScope: true}
-
-	t.Run("a case that was not interpreted is not applicable and does not touch the plan", func(t *testing.T) {
-		b := &fakeBackend{name: "memory"}
-		r := runScenario(context.Background(), c, "memory", b)
-		assert.Equal(t, StatusNotApplicable, r.Status)
-		assert.Contains(t, r.Reason, "提供しない")
-		assert.Zero(t, b.opens)
-	})
-
-	t.Run("it is not applicable even without a backend", func(t *testing.T) {
-		r := runScenario(context.Background(), c, "dynamodb", nil)
-		assert.Equal(t, StatusNotApplicable, r.Status)
 	})
 }

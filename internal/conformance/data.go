@@ -1,6 +1,7 @@
 package conformance
 
 import (
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"math/big"
@@ -8,6 +9,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/bigtableenvelope"
 )
 
 // DataVersion is the only supported version of the conformance data.
@@ -30,9 +33,6 @@ type ValueCase struct {
 	Input         ValueInput
 	Expect        map[string]any
 	TimePrecision string
-	// OutOfScope is true when the case targets a storage this language does not provide.
-	// Its input is not interpreted.
-	OutOfScope bool
 }
 
 // ScenarioCase is a scenario case. Materialized is Raw with generators expanded.
@@ -47,9 +47,6 @@ type ScenarioCase struct {
 	Materialized  map[string]any
 	// Plan is Materialized read into its steps, faults and expectations.
 	Plan *ScenarioPlan
-	// OutOfScope is true when no provided backend is in Backends. The case is not
-	// interpreted, so Plan is nil.
-	OutOfScope bool
 }
 
 // LayoutCase is a case of dynamodb/layout.json.
@@ -82,6 +79,10 @@ var valueInputShapes = map[string]valueInputShape{
 	"validateOccurredAt": {required: []string{"iso8601", "epoch_nanoseconds", "event_seq_nr"}},
 	"validateSeqNr":      {required: []string{"seq_nr", "context"}},
 	"fnv1a64":            {required: []string{"utf8"}},
+
+	"encodeBigtableEventEnvelope":    {required: []string{"aid", "seq_nr", "occurred_at_ns", "manifest", "payload_hex"}},
+	"encodeBigtableSnapshotEnvelope": {required: []string{"seq_nr", "manifest", "payload_hex"}},
+	"decodeBigtableEnvelope":         {required: []string{"kind", "bytes_hex"}},
 }
 
 func checkValueInputShape(op string, in map[string]any) error {
@@ -251,25 +252,6 @@ func loadExclusions(d *Data, rel string, obj map[string]any) error {
 	return nil
 }
 
-// providedBackends are the storages this language provides.
-var providedBackends = []string{"memory", "dynamodb", "sqlite", "spanner"}
-
-// unprovidedValueOperations are the value operations of storages this language does not provide.
-var unprovidedValueOperations = map[string]string{
-	"encodeBigtableEventEnvelope":    "bigtable",
-	"encodeBigtableSnapshotEnvelope": "bigtable",
-	"decodeBigtableEnvelope":         "bigtable",
-}
-
-func targetsProvidedBackend(backends []string) bool {
-	for _, b := range providedBackends {
-		if contains(backends, b) {
-			return true
-		}
-	}
-	return false
-}
-
 func loadCases(d *Data, rel, format string, obj map[string]any, ids map[string]string) error {
 	list, ok := obj["cases"].([]any)
 	if !ok {
@@ -294,15 +276,6 @@ func loadCases(d *Data, rel, format string, obj map[string]any, ids map[string]s
 		}
 		switch format {
 		case "values":
-			if op, _ := c["operation"].(string); unprovidedValueOperations[op] != "" {
-				in, _ := c["input"].(map[string]any)
-				expect, _ := c["expect"].(map[string]any)
-				d.Values = append(d.Values, ValueCase{
-					ID: id, File: rel, Rules: rules, Operation: op,
-					Input: ValueInput{Raw: in}, Expect: expect, OutOfScope: true,
-				})
-				continue
-			}
 			precision, err := timePrecision(c)
 			if err != nil {
 				return fmt.Errorf("%s: case %q: %w", rel, id, err)
@@ -316,12 +289,6 @@ func loadCases(d *Data, rel, format string, obj map[string]any, ids map[string]s
 			backends, err := stringList(c["backends"])
 			if err != nil {
 				return fmt.Errorf("%s: case %q: backends: %w", rel, id, err)
-			}
-			if !targetsProvidedBackend(backends) {
-				d.Scenarios = append(d.Scenarios, ScenarioCase{
-					ID: id, File: rel, Rules: rules, Backends: backends, Raw: c, OutOfScope: true,
-				})
-				continue
 			}
 			precision, err := timePrecision(c)
 			if err != nil {
@@ -345,6 +312,9 @@ func loadCases(d *Data, rel, format string, obj map[string]any, ids map[string]s
 				return fmt.Errorf("%s: case %q: %w", rel, id, err)
 			}
 			if err := checkSpannerOnlyUse(plan, backends, rules); err != nil {
+				return fmt.Errorf("%s: case %q: %w", rel, id, err)
+			}
+			if err := checkBigtableOnlyUse(plan, backends, rules); err != nil {
 				return fmt.Errorf("%s: case %q: %w", rel, id, err)
 			}
 			d.Scenarios = append(d.Scenarios, ScenarioCase{
@@ -371,6 +341,9 @@ func newValueCase(rel, id string, rules []string, precision string, c map[string
 		return ValueCase{}, fmt.Errorf("input is not an object")
 	}
 	if err := checkValueInputShape(op, in); err != nil {
+		return ValueCase{}, err
+	}
+	if err := checkBigtableEnvelopeInput(op, in); err != nil {
 		return ValueCase{}, err
 	}
 	expect, ok := c["expect"].(map[string]any)
@@ -431,4 +404,57 @@ func stringList(v any) ([]string, error) {
 		out = append(out, s)
 	}
 	return out, nil
+}
+
+// checkBigtableEnvelopeInput rejects the data errors of the envelope operations: input that is not the documented
+// kind, hexadecimal or decimal text, and a decodeBigtableEnvelope case whose bytes are a well-formed envelope (the
+// operation only stands for envelopes whose decoding is a storage error).
+func checkBigtableEnvelopeInput(op string, in map[string]any) error {
+	switch op {
+	case "encodeBigtableEventEnvelope", "encodeBigtableSnapshotEnvelope":
+		if _, err := hexInput(in, "payload_hex"); err != nil {
+			return err
+		}
+		if _, ok := in["manifest"].(string); !ok {
+			return fmt.Errorf("input.manifest is not a string")
+		}
+		if op == "encodeBigtableEventEnvelope" {
+			if _, ok := in["aid"].(string); !ok {
+				return fmt.Errorf("input.aid is not a string")
+			}
+			if _, err := bigIntFromDecimalString(in["occurred_at_ns"]); err != nil {
+				return fmt.Errorf("input.occurred_at_ns: %w", err)
+			}
+		}
+	case "decodeBigtableEnvelope":
+		raw, err := hexInput(in, "bytes_hex")
+		if err != nil {
+			return err
+		}
+		var decodeErr error
+		switch in["kind"] {
+		case "event":
+			_, decodeErr = bigtableenvelope.DecodeEvent(raw)
+		case "snapshot":
+			_, decodeErr = bigtableenvelope.DecodeSnapshot(raw)
+		default:
+			return fmt.Errorf("input.kind is neither event nor snapshot")
+		}
+		if decodeErr == nil {
+			return fmt.Errorf("input.bytes_hex is a well-formed envelope, which decodeBigtableEnvelope does not accept")
+		}
+	}
+	return nil
+}
+
+func hexInput(in map[string]any, key string) ([]byte, error) {
+	text, ok := in[key].(string)
+	if !ok {
+		return nil, fmt.Errorf("input.%s is not a string", key)
+	}
+	raw, err := hex.DecodeString(text)
+	if err != nil || strings.ToLower(text) != text {
+		return nil, fmt.Errorf("input.%s is not lower-case hexadecimal", key)
+	}
+	return raw, nil
 }

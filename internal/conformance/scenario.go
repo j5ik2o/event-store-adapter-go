@@ -236,9 +236,8 @@ func (p *ScenarioPlan) SnapshotFixture(name string) (Snapshot, error) {
 	return toSnapshot(f)
 }
 
-// storeConfigKeys are the store settings that parseStoreConfig interprets. The schema also allows
-// settings of storages this language does not provide; a scenario of a provided storage that sets
-// one of them is rejected instead of running with the setting silently dropped.
+// storeConfigKeys are the store settings that parseStoreConfig interprets. A setting that belongs to one storage is
+// rejected for the others by the checks below instead of running with the setting silently dropped.
 var storeConfigKeys = map[string]bool{
 	"retention_count":   true,
 	"retention_mode":    true,
@@ -251,6 +250,8 @@ var storeConfigKeys = map[string]bool{
 
 	"transaction_retry_limit": true,
 	"ttl_grace_days":          true,
+
+	"envelope_limit_bytes": true,
 }
 
 func parseStoreConfig(m map[string]any) (StoreConfig, error) {
@@ -294,6 +295,9 @@ func parseStoreConfig(m map[string]any) (StoreConfig, error) {
 		return c, err
 	}
 	if c.TransactionRetryLimit, err = optInt64(m, "transaction_retry_limit"); err != nil {
+		return c, err
+	}
+	if c.EnvelopeLimitBytes, err = optInt64(m, "envelope_limit_bytes"); err != nil {
 		return c, err
 	}
 	if v, present := m["change_feed"]; present {
@@ -627,8 +631,9 @@ func checkSQLiteOnlyUse(p *ScenarioPlan, backends, rules []string) error {
 		return fmt.Errorf("lock_wait_milliseconds is only for a scenario whose backends are exactly [sqlite]")
 	}
 	onlySpanner := len(backends) == 1 && backends[0] == "spanner"
-	if p.SeedConfiguration != nil && !onlySQLite && !onlySpanner {
-		return fmt.Errorf("seed.configuration is only for a scenario whose backends are exactly [sqlite] or exactly [spanner]")
+	onlyBigtable := len(backends) == 1 && backends[0] == "bigtable"
+	if p.SeedConfiguration != nil && !onlySQLite && !onlySpanner && !onlyBigtable {
+		return fmt.Errorf("seed.configuration is only for a scenario whose backends are exactly [sqlite], exactly [spanner] or exactly [bigtable]")
 	}
 	held, failedWhileHeld, usesLock := false, false, false
 	for _, step := range p.Steps {
@@ -705,4 +710,49 @@ func checkSpannerOnlyUse(p *ScenarioPlan, backends, rules []string) error {
 		}
 	}
 	return nil
+}
+
+// checkBigtableOnlyUse rejects the misuse that conformance/README.md defines as a data error for Bigtable:
+// envelope_limit_bytes is for a scenario whose backends are exactly ["bigtable"], a journal-write-* fault is used only
+// by such a scenario that names BT-7 and fails the request (kind storage-error, injection replace-request), and
+// journal-write-previous is never injected into the first append, which has no previous event to write.
+func checkBigtableOnlyUse(p *ScenarioPlan, backends, rules []string) error {
+	onlyBigtable := len(backends) == 1 && backends[0] == "bigtable"
+	if p.Store.EnvelopeLimitBytes != nil && !onlyBigtable {
+		return fmt.Errorf("envelope_limit_bytes is only for a scenario whose backends are exactly [bigtable]")
+	}
+	for _, f := range p.Faults {
+		if f.Phase != "journal-write-previous" && f.Phase != "journal-write-tail" {
+			continue
+		}
+		switch {
+		case !onlyBigtable:
+			return fmt.Errorf("a %s fault is only for a scenario whose backends are exactly [bigtable]", f.Phase)
+		case !contains(rules, "BT-7"):
+			return fmt.Errorf("a scenario with a %s fault needs the rule BT-7", f.Phase)
+		case f.Kind != "storage-error" || f.Injection != "replace-request":
+			return fmt.Errorf("a %s fault needs kind storage-error and injection replace-request", f.Phase)
+		case f.Phase == "journal-write-previous" && firstAppendOf(p, f.Operation):
+			return fmt.Errorf("journal-write-previous is injected into operation %d, the first append of its aggregate, which has no previous event", f.Operation)
+		}
+	}
+	return nil
+}
+
+// firstAppendOf tells whether the given operation is the first persist step that targets its aggregate.
+func firstAppendOf(p *ScenarioPlan, operation int) bool {
+	if operation < 1 || operation > len(p.Steps) {
+		return false
+	}
+	step := p.Steps[operation-1]
+	if step.Op != "persistEvent" && step.Op != "persistEventAndSnapshot" {
+		return false
+	}
+	aid := p.Events[step.Event].AID
+	for _, earlier := range p.Steps[:operation-1] {
+		if (earlier.Op == "persistEvent" || earlier.Op == "persistEventAndSnapshot") && p.Events[earlier.Event].AID == aid {
+			return false
+		}
+	}
+	return true
 }

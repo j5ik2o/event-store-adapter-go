@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/j5ik2o/event-store-adapter-go/v5/internal/bigtabletest"
 	"github.com/j5ik2o/event-store-adapter-go/v5/internal/conformance"
 	"github.com/j5ik2o/event-store-adapter-go/v5/internal/dynamodbtest"
 	"github.com/j5ik2o/event-store-adapter-go/v5/internal/spannertest"
@@ -30,7 +31,7 @@ func TestConformance(t *testing.T) {
 			t.Cleanup(func() { require.NoError(t, environment.Close(context.Background())) })
 		}
 		return environment, err
-	}, startSpannerEnvironment(t))
+	}, startSpannerEnvironment(t), startBigtableEnvironment(t))
 	t.Logf("summary: %v", report.Summary)
 	require.NoError(t, err)
 }
@@ -46,9 +47,20 @@ func startSpannerEnvironment(t *testing.T) func(context.Context) (*spannertest.E
 	}
 }
 
+// startBigtableEnvironment starts the real emulator for the conformance run; the test owns its shutdown.
+func startBigtableEnvironment(t *testing.T) func(context.Context) (*bigtabletest.Environment, error) {
+	return func(ctx context.Context) (*bigtabletest.Environment, error) {
+		environment, err := bigtabletest.Start(ctx)
+		if err == nil {
+			t.Cleanup(func() { require.NoError(t, environment.Close(context.Background())) })
+		}
+		return environment, err
+	}
+}
+
 // runConformance retains preparation diagnostics and attempts every report before
 // returning failure. The start function owns cleanup of a successfully started environment.
-func runConformance(ctx context.Context, root, requiredPath, path string, start func(context.Context) (*dynamodbtest.Environment, error), startSpanner func(context.Context) (*spannertest.Environment, error)) (conformance.Report, error) {
+func runConformance(ctx context.Context, root, requiredPath, path string, start func(context.Context) (*dynamodbtest.Environment, error), startSpanner func(context.Context) (*spannertest.Environment, error), startBigtable func(context.Context) (*bigtabletest.Environment, error)) (conformance.Report, error) {
 	var causes []error
 	record := func(stage string, err error) {
 		if err != nil {
@@ -69,7 +81,7 @@ func runConformance(ctx context.Context, root, requiredPath, path string, start 
 		}
 	}
 	var results []conformance.CaseResult
-	backends := []conformance.BackendState{{Name: "memory"}, {Name: "dynamodb"}, {Name: "sqlite"}, {Name: "spanner"}}
+	backends := []conformance.BackendState{{Name: "memory"}, {Name: "dynamodb"}, {Name: "sqlite"}, {Name: "spanner"}, {Name: "bigtable"}}
 	if len(causes) == 0 {
 		environment, err := start(ctx)
 		record("setup", err)
@@ -81,7 +93,9 @@ func runConformance(ctx context.Context, root, requiredPath, path string, start 
 			spannerDatabase, databaseErr = spannerEnvironment.CreateDatabase(ctx)
 			record("spanner database", databaseErr)
 		}
-		if err == nil && spannerDatabase != nil {
+		bigtableEnvironment, bigtableErr := startBigtable(ctx)
+		record("bigtable setup", bigtableErr)
+		if err == nil && spannerDatabase != nil && bigtableErr == nil {
 			for i, run := range []struct {
 				name    string
 				backend conformance.Backend
@@ -90,6 +104,7 @@ func runConformance(ctx context.Context, root, requiredPath, path string, start 
 				{"dynamodb", &publicBackend{name: "dynamodb", environment: environment}},
 				{"sqlite", newSQLiteBackend()},
 				{"spanner", newSpannerBackend(spannerDatabase)},
+				{"bigtable", newBigtableBackend(bigtableEnvironment)},
 			} {
 				actual := conformance.RunBackend(ctx, data, run.backend)
 				results = append(results, actual...)
@@ -149,7 +164,8 @@ func TestConformanceSetupFailureReport(t *testing.T) {
 			}
 			cause := errors.New("declared container startup failure")
 			spannerCause := errors.New("declared emulator startup failure")
-			starts, spannerStarts := 0, 0
+			bigtableCause := errors.New("declared bigtable emulator startup failure")
+			starts, spannerStarts, bigtableStarts := 0, 0, 0
 
 			report, err := runConformance(t.Context(), filepath.Join("..", "..", "conformance"), "required.json", path, func(context.Context) (*dynamodbtest.Environment, error) {
 				starts++
@@ -157,21 +173,28 @@ func TestConformanceSetupFailureReport(t *testing.T) {
 			}, func(context.Context) (*spannertest.Environment, error) {
 				spannerStarts++
 				return nil, spannerCause
+			}, func(context.Context) (*bigtabletest.Environment, error) {
+				bigtableStarts++
+				return nil, bigtableCause
 			})
 
 			require.ErrorIs(t, err, cause)
 			require.ErrorIs(t, err, spannerCause, "a Spanner emulator that does not start is a failure, never a skip")
 			require.Equal(t, 1, starts)
+			require.ErrorIs(t, err, bigtableCause, "a Bigtable emulator that does not start is a failure, never a skip")
 			require.Equal(t, 1, spannerStarts)
+			require.Equal(t, 1, bigtableStarts)
 			require.Contains(t, report.Errors, "setup: "+cause.Error())
 			require.Contains(t, report.Errors, "spanner setup: "+spannerCause.Error())
+			require.Contains(t, report.Errors, "bigtable setup: "+bigtableCause.Error())
 			require.True(t, report.Manifest.Verified)
 			require.Len(t, report.Required.Lists["memory"], 67)
 			require.Len(t, report.Required.Lists["dynamodb"], 106)
 			require.Len(t, report.Required.Lists["sqlite"], 68)
 			require.Len(t, report.Required.Lists["spanner"], 79)
+			require.Len(t, report.Required.Lists["bigtable"], 87)
 			require.Empty(t, report.Cases)
-			require.Equal(t, []conformance.BackendState{{Name: "memory"}, {Name: "dynamodb"}, {Name: "sqlite"}, {Name: "spanner"}}, report.Backends)
+			require.Equal(t, []conformance.BackendState{{Name: "memory"}, {Name: "dynamodb"}, {Name: "sqlite"}, {Name: "spanner"}, {Name: "bigtable"}}, report.Backends)
 			require.NotEmpty(t, report.FailureReasons())
 			if writable {
 				raw, readErr := os.ReadFile(path)
@@ -224,12 +247,15 @@ func TestConformancePreparationFailureReport(t *testing.T) {
 			}, func(context.Context) (*spannertest.Environment, error) {
 				starts++
 				return nil, errors.New("spanner setup must not run with invalid preparation")
+			}, func(context.Context) (*bigtabletest.Environment, error) {
+				starts++
+				return nil, errors.New("bigtable setup must not run with invalid preparation")
 			})
 
 			require.ErrorContains(t, err, stage+": ")
 			require.Zero(t, starts)
 			require.Empty(t, report.Cases)
-			require.Equal(t, []conformance.BackendState{{Name: "memory"}, {Name: "dynamodb"}, {Name: "sqlite"}, {Name: "spanner"}}, report.Backends)
+			require.Equal(t, []conformance.BackendState{{Name: "memory"}, {Name: "dynamodb"}, {Name: "sqlite"}, {Name: "spanner"}, {Name: "bigtable"}}, report.Backends)
 			raw, readErr := os.ReadFile(path)
 			require.NoError(t, readErr)
 			var saved conformance.Report
@@ -379,4 +405,39 @@ func TestPublicSpannerConformance(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, gate.Violations)
 	require.ElementsMatch(t, applicable, required["spanner"])
+}
+
+// TestPublicBigtableConformance runs every applicable case against a real Bigtable emulator. No case is skipped or
+// unrepresentable: the unsupported change feed is a successful rejection, and a case that does not run fails the gate.
+func TestPublicBigtableConformance(t *testing.T) {
+	data, err := conformance.LoadData(filepath.Join("..", "..", "conformance"))
+	require.NoError(t, err)
+	required, err := conformance.LoadRequired("required.json")
+	require.NoError(t, err)
+	ctx := context.Background()
+	environment, err := startBigtableEnvironment(t)(ctx)
+	require.NoError(t, err)
+
+	results := conformance.RunBackend(ctx, data, newBigtableBackend(environment))
+
+	success := 0
+	for _, result := range results {
+		if result.Backend != "bigtable" {
+			continue
+		}
+		switch result.Status {
+		case conformance.StatusSuccess:
+			success++
+		case conformance.StatusNotApplicable:
+		default:
+			t.Errorf("%s: %s: %s", result.ID, result.Status, result.Reason)
+		}
+	}
+	applicable := conformance.ApplicableCases(data, "bigtable")
+	require.Len(t, applicable, 87)
+	require.Equal(t, len(applicable), success, "every applicable case succeeds: zero failures and zero unverified")
+	gate, err := conformance.EvaluateRequired(conformance.RequiredList{"bigtable": required["bigtable"]}, results)
+	require.NoError(t, err)
+	require.Empty(t, gate.Violations)
+	require.ElementsMatch(t, applicable, required["bigtable"])
 }

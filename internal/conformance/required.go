@@ -15,9 +15,9 @@ type GateResult struct {
 	Violations []string     `json:"violations"`
 }
 
-var requiredBackends = []string{"memory", "dynamodb", "sqlite", "spanner"}
+var requiredBackends = []string{"memory", "dynamodb", "sqlite", "spanner", "bigtable"}
 
-// LoadRequired reads required.json. The keys must be exactly memory, dynamodb, sqlite and spanner.
+// LoadRequired reads required.json. The keys must be exactly memory, dynamodb, sqlite, spanner and bigtable.
 func LoadRequired(path string) (RequiredList, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
