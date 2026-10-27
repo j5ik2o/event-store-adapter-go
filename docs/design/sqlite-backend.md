@@ -8,7 +8,7 @@ This record maps the rules of the SQLite profile of [common contract v5](https:/
 
 | Decision | Choice | Reason |
 |---|---|---|
-| Driver | `modernc.org/sqlite` v1.59.0 | Pure Go, so `go test -race` and CI need no cgo. v1.60.0 and later require `go 1.26.0`, which would raise the minimum Go version of this module. The bundled SQLite is 3.53.4, above the required 3.51.3. |
+| Driver | `modernc.org/sqlite` v1.59.0 | The driver is pure Go and needs no cgo. The race detector is a separate requirement: on Linux (including the `ubuntu-latest` CI that runs `make test`) it needs cgo and a host C toolchain, on Windows it needs a host C toolchain, and on macOS it needs no cgo since Go 1.20. v1.60.0 and later require `go 1.26.0`, which would raise the minimum Go version of this module. The bundled SQLite is 3.53.4, above the required 3.51.3. |
 | Public shape | `Initialize`, `Open`, `Store.Close`, `New` | `Open` returns a `*Store` that owns the file and the connection; `New` connects serializers, like `memory.NewStore` and `memory.New`. |
 | Connection | One `*sql.Conn` per `Store`, used under a mutex | The connection is never shared by two operations (SQ-17) and every connection gets the settings of SQ-1. |
 | Transactions | `BEGIN`, `BEGIN IMMEDIATE`, `COMMIT` and `ROLLBACK` run as SQL | An append needs `BEGIN IMMEDIATE`; the driver's `_txlock` would apply to every transaction. |

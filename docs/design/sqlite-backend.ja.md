@@ -10,7 +10,7 @@
 
 | 決定 | 選択 | 理由 |
 |---|---|---|
-| ドライバー | `modernc.org/sqlite` v1.59.0 | cgo を使わない Go の実装なので、`go test -race` と CI に cgo が要りません。v1.60.0 以降は `go 1.26.0` を要求し、このモジュールの Go の最低版を上げてしまいます。同梱の SQLite は 3.53.4 で、要求の 3.51.3 以上を満たします。 |
+| ドライバー | `modernc.org/sqlite` v1.59.0 | ドライバー自体は cgo を使わない Go の実装で、cgo が要りません。race detector の要件は別です。Linux（`make test` を実行する `ubuntu-latest` の CI を含む）では cgo とホストの C ツールチェーンが要り、Windows ではホストの C ツールチェーンが要ります。macOS では Go 1.20 以降 cgo が要りません。v1.60.0 以降は `go 1.26.0` を要求し、このモジュールの Go の最低版を上げてしまいます。同梱の SQLite は 3.53.4 で、要求の 3.51.3 以上を満たします。 |
 | 公開する形 | `Initialize`、`Open`、`Store.Close`、`New` | `Open` はファイルと接続を持つ `*Store` を返し、`New` が serializer をつなぎます。`memory.NewStore` と `memory.New` の流れと同じです。 |
 | 接続 | `Store` ごとに `*sql.Conn` を 1 本持ち、mutex の下で使う | 接続を 2 つの操作で共有せず（SQ-17）、すべての接続に SQ-1 の設定を適用します。 |
 | トランザクション | `BEGIN`、`BEGIN IMMEDIATE`、`COMMIT`、`ROLLBACK` を SQL として実行する | 追記には `BEGIN IMMEDIATE` が要ります。ドライバーの `_txlock` はすべてのトランザクションに効いてしまいます。 |

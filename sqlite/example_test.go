@@ -26,7 +26,6 @@ func ExampleNew() {
 	if err != nil {
 		panic(err)
 	}
-	defer store.Close()
 	es, err := sqlite.New(store, eventstore.NewJSONSerializer[string](), eventstore.NewJSONSerializer[string]())
 	if err != nil {
 		panic(err)
@@ -45,6 +44,20 @@ func ExampleNew() {
 		if err != nil {
 			panic(err)
 		}
+	}
+
+	// A later start opens the same file with Open only; Initialize would fail on an initialized file.
+	if err := store.Close(); err != nil {
+		panic(err)
+	}
+	store, err = sqlite.Open(ctx, path, sqlite.Config{}, opts...)
+	if err != nil {
+		panic(err)
+	}
+	defer store.Close()
+	es, err = sqlite.New(store, eventstore.NewJSONSerializer[string](), eventstore.NewJSONSerializer[string]())
+	if err != nil {
+		panic(err)
 	}
 	latest, err := es.GetLatestSnapshotByID(ctx, id)
 	if err != nil {

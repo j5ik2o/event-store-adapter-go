@@ -13,7 +13,7 @@
 | journal | (`aid`, `seq_nr`) | すべてのイベント |
 | head | `aid` | 集約ごとの最新のイベントと型名 |
 | snapshot_current | `aid` | 最新のスナップショット |
-| snapshot_history | (`aid`, `seq_nr`) | 古いスナップショット。保持件数を指定したときだけ残す |
+| snapshot_history | (`aid`, `seq_nr`) | スナップショットの履歴。保持件数を指定したときだけ残す。ペア書き込みは新しいスナップショットを `snapshot_current` と履歴の両方に入れるので、最新のスナップショットは 2 つの表に重複して入る |
 | config | `singleton`（常に 1） | ストア ID、配置の版、固定の設定 |
 
 `aid` は、検証済みの型名、ハイフン、ID の値をつなげたものです。宣言は `TEXT COLLATE BINARY` で、主キーの索引も `BINARY` なので、`User-A` と `User-a` は別の集約です。`head_transition` の表も変更フィードもありません。
@@ -29,13 +29,18 @@ import (
     "github.com/j5ik2o/event-store-adapter-go/v5/sqlite"
 )
 
+// 新しいファイルでだけ一度実行する。初期化済みのファイルでは Initialize は失敗する。
+func initializeSQLite(ctx context.Context, path string) error {
+    keep, err := eventstore.KeepLatest(2)
+    if err != nil { return err }
+    return sqlite.Initialize(ctx, path, sqlite.Config{}, eventstore.WithRetentionCount(keep))
+}
+
+// 起動のたびに実行する。Open はファイルを作らず、初期化もしない。
 func openSQLite(ctx context.Context, path string) (*sqlite.Store, eventstore.EventStore[orderEvent, orderState], error) {
     keep, err := eventstore.KeepLatest(2)
     if err != nil { return nil, nil, err }
-    opts := []eventstore.Option{eventstore.WithRetentionCount(keep)}
-    // 新しいファイルでは Initialize を一度だけ実行する。Open はファイルを作らず、初期化もしない。
-    if err := sqlite.Initialize(ctx, path, sqlite.Config{}, opts...); err != nil { return nil, nil, err }
-    store, err := sqlite.Open(ctx, path, sqlite.Config{}, opts...)
+    store, err := sqlite.Open(ctx, path, sqlite.Config{}, eventstore.WithRetentionCount(keep))
     if err != nil { return nil, nil, err }
     es, err := sqlite.New(store, eventstore.NewJSONSerializer[orderEvent](), eventstore.NewJSONSerializer[orderState]())
     if err != nil { _ = store.Close(); return nil, nil, err }

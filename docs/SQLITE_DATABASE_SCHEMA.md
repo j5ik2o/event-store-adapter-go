@@ -11,7 +11,7 @@ This is layout version 1 of the SQLite profile of [common contract v5](https://g
 | journal | (`aid`, `seq_nr`) | Every event |
 | head | `aid` | The latest event of each aggregate and its type name |
 | snapshot_current | `aid` | The newest snapshot |
-| snapshot_history | (`aid`, `seq_nr`) | Older snapshots, kept only when a retention count is set |
+| snapshot_history | (`aid`, `seq_nr`) | Snapshot history, kept only when a retention count is set. A pair write inserts the new snapshot here as well as into `snapshot_current`, so the newest snapshot is stored in both tables |
 | config | `singleton` (always 1) | The store ID, layout version and fixed settings |
 
 `aid` is the validated type name, a hyphen, and the ID value. It is declared `TEXT COLLATE BINARY`, and its primary key index is also `BINARY`, so `User-A` and `User-a` are different aggregates. There is no `head_transition` table and no change feed.
@@ -27,13 +27,18 @@ import (
     "github.com/j5ik2o/event-store-adapter-go/v5/sqlite"
 )
 
+// Run once for a new file. Initialize fails on a file that is already initialized.
+func initializeSQLite(ctx context.Context, path string) error {
+    keep, err := eventstore.KeepLatest(2)
+    if err != nil { return err }
+    return sqlite.Initialize(ctx, path, sqlite.Config{}, eventstore.WithRetentionCount(keep))
+}
+
+// Run at every start. Open never creates or initializes a file.
 func openSQLite(ctx context.Context, path string) (*sqlite.Store, eventstore.EventStore[orderEvent, orderState], error) {
     keep, err := eventstore.KeepLatest(2)
     if err != nil { return nil, nil, err }
-    opts := []eventstore.Option{eventstore.WithRetentionCount(keep)}
-    // Run Initialize once for a new file. Open never creates or initializes a file.
-    if err := sqlite.Initialize(ctx, path, sqlite.Config{}, opts...); err != nil { return nil, nil, err }
-    store, err := sqlite.Open(ctx, path, sqlite.Config{}, opts...)
+    store, err := sqlite.Open(ctx, path, sqlite.Config{}, eventstore.WithRetentionCount(keep))
     if err != nil { return nil, nil, err }
     es, err := sqlite.New(store, eventstore.NewJSONSerializer[orderEvent](), eventstore.NewJSONSerializer[orderState]())
     if err != nil { _ = store.Close(); return nil, nil, err }

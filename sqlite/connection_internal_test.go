@@ -32,3 +32,16 @@ func TestMeetsMinimumVersion(t *testing.T) {
 		})
 	}
 }
+
+// A Windows drive path must not become the authority of the URI; the result is the same on every OS.
+func TestBuildFileURI(t *testing.T) {
+	for name, tc := range map[string]struct{ path, mode, want string }{
+		"posix":          {"/var/data/events.db", "rw", "file:///var/data/events.db?mode=rw&cache=private"},
+		"windows drive":  {"C:/Users/u/events.db", "rwc", "file:///C:/Users/u/events.db?mode=rwc&cache=private"},
+		"windows spaces": {"D:/my data/events.db", "rw", "file:///D:/my%20data/events.db?mode=rw&cache=private"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, tc.want, buildFileURI(tc.path, tc.mode))
+		})
+	}
+}

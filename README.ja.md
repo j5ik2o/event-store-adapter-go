@@ -175,12 +175,18 @@ import (
     "github.com/j5ik2o/event-store-adapter-go/v5/sqlite"
 )
 
+// 新しいファイルでだけ一度実行する。初期化済みのファイルでは Initialize は失敗する。
+func initializeSQLite(ctx context.Context, path string) error {
+    keep, err := eventstore.KeepLatest(2)
+    if err != nil { return err }
+    return sqlite.Initialize(ctx, path, sqlite.Config{}, eventstore.WithRetentionCount(keep))
+}
+
+// 起動のたびに実行する。Open はファイルを作らず、初期化もしない。
 func openSQLite(ctx context.Context, path string) (*sqlite.Store, eventstore.EventStore[orderEvent, orderState], error) {
     keep, err := eventstore.KeepLatest(2)
     if err != nil { return nil, nil, err }
-    opts := []eventstore.Option{eventstore.WithRetentionCount(keep)}
-    if err := sqlite.Initialize(ctx, path, sqlite.Config{}, opts...); err != nil { return nil, nil, err }
-    store, err := sqlite.Open(ctx, path, sqlite.Config{}, opts...)
+    store, err := sqlite.Open(ctx, path, sqlite.Config{}, eventstore.WithRetentionCount(keep))
     if err != nil { return nil, nil, err }
     es, err := sqlite.New(store, eventstore.NewJSONSerializer[orderEvent](), eventstore.NewJSONSerializer[orderState]())
     if err != nil { _ = store.Close(); return nil, nil, err }

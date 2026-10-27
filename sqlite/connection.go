@@ -51,8 +51,17 @@ func fileURI(path string, create bool) (string, error) {
 	if create {
 		mode = "rwc"
 	}
-	u := url.URL{Scheme: "file", Path: filepath.ToSlash(absolute), RawQuery: "mode=" + mode + "&cache=private"}
-	return u.String(), nil
+	return buildFileURI(filepath.ToSlash(absolute), mode), nil
+}
+
+// buildFileURI builds the URI from an absolute path written with forward slashes.
+// A Windows drive path such as "C:/x" has no leading slash and would be read as an authority, so it becomes "file:///C:/x".
+func buildFileURI(slashedPath, mode string) string {
+	if !strings.HasPrefix(slashedPath, "/") {
+		slashedPath = "/" + slashedPath
+	}
+	u := url.URL{Scheme: "file", Path: slashedPath, RawQuery: "mode=" + mode + "&cache=private"}
+	return u.String()
 }
 
 // connection is the single database connection that a Store (or Initialize) owns.
