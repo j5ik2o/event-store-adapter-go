@@ -77,11 +77,10 @@ type Report struct {
 }
 
 const (
-	reasonFnv1a64           = "FNV-1a 64 のハッシュを使う保存先は、この言語（Go）では Spanner だけであり、それ以外の保存先はこのハッシュを使わないため対象外（K-1）"
-	reasonMillis            = "Go の time.Time はナノ秒精度であり、representation.time_precision が milliseconds のケースは対象外（設計 5.1）"
-	reasonUnprovidedBackend = "この言語（Go）は保存先 %s を提供しないため対象外"
-	reasonBigtableEnvelope  = "この言語（Go）は Bigtable の保存先を提供しないため、Bigtable の封筒の値の表は対象外"
-	reasonLayoutNoBackend   = "配置照合は実行していない。DynamoDB に未接続（設計 7.2 の4番）"
+	reasonFnv1a64          = "FNV-1a 64 のハッシュを使う保存先は、この言語（Go）では Spanner と Bigtable だけであり、それ以外の保存先はこのハッシュを使わないため対象外（K-1）"
+	reasonMillis           = "Go の time.Time はナノ秒精度であり、representation.time_precision が milliseconds のケースは対象外（設計 5.1）"
+	reasonBigtableEnvelope = "Bigtable の封筒の値の表（BT-D6a）は Bigtable だけが使うため、それ以外の保存先では対象外"
+	reasonLayoutNoBackend  = "配置照合は実行していない。DynamoDB に未接続（設計 7.2 の4番）"
 )
 
 func nonNil(s []string) []string {

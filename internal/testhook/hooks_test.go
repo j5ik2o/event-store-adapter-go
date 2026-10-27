@@ -26,9 +26,10 @@ func TestPhases(t *testing.T) {
 		"serialize-event", "serialize-snapshot", "deserialize-event", "deserialize-snapshot",
 		"commit", "read-events", "read-snapshot", "retention-query", "retention-delete",
 		"retention-mark", "configuration-read", "configuration-create",
+		"journal-write-previous", "journal-write-tail",
 	}
-	t.Run("the 12 phases of the schema are known", func(t *testing.T) {
-		assert.Len(t, Phases(), 12)
+	t.Run("the 14 phases of the schema are known", func(t *testing.T) {
+		assert.Len(t, Phases(), 14)
 		for _, s := range want {
 			_, ok := ParsePhase(s)
 			assert.True(t, ok, s)

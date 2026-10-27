@@ -230,6 +230,7 @@ func TestRunBackendRunsTheHashTableOnlyForStoragesThatUseTheHash(t *testing.T) {
 				seen++
 				assert.Equal(t, StatusNotApplicable, r.Status, "%s %s", name, r.ID)
 				assert.Contains(t, r.Reason, "Spanner", "the reason says which storages use the hash")
+				assert.Contains(t, r.Reason, "Bigtable", "the reason names both storages that use the hash")
 			}
 		}
 		assert.Equal(t, 4, seen, name)
@@ -249,4 +250,15 @@ func TestRunBackendRunsTheHashTableOnlyForStoragesThatUseTheHash(t *testing.T) {
 	for _, id := range ApplicableCases(d, "spanner") {
 		assert.NotEqual(t, "", id)
 	}
+
+	bigtable := RunBackend(t.Context(), d, &fakeBackend{name: "bigtable"})
+	seenBigtable := 0
+	for _, r := range bigtable {
+		if hashIDs[r.ID] {
+			seenBigtable++
+			assert.Equal(t, StatusSuccess, r.Status, "%s: %s", r.ID, r.Reason)
+			assert.Equal(t, "bigtable", r.Backend)
+		}
+	}
+	assert.Equal(t, 4, seenBigtable)
 }

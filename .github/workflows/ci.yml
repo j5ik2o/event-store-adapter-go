@@ -64,7 +64,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: '1.27'
-      # DynamoDB Local and the Cloud Spanner emulator are started in containers by the tests
+      # DynamoDB Local, the Cloud Spanner emulator and the Cloud Bigtable emulator are started in containers by the tests
       # (testcontainers-go); Docker is available on ubuntu-latest. A container that does not start fails the job.
       - name: Run conformance runner
         env:
