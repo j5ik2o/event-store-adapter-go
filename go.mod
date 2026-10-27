@@ -18,7 +18,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.44.0
 	google.golang.org/api v0.288.0
 	google.golang.org/grpc v1.83.2
-	google.golang.org/protobuf v1.36.11
+	google.golang.org/protobuf v1.36.12
 	modernc.org/sqlite v1.61.0
 )
 
