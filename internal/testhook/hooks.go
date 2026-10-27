@@ -60,6 +60,8 @@ type Point struct {
 type InjectedError struct {
 	Phase   Phase
 	Message string
+	// Aborted marks a transaction abort (Spanner ABORTED): the storage re-runs the transaction instead of failing.
+	Aborted bool
 }
 
 func (e *InjectedError) Error() string {
@@ -94,6 +96,7 @@ type Hooks struct {
 	clock       Clock
 	sleeper     Sleeper
 	fail        map[Phase][]FailHook
+	response    []FailHook
 	historyPage HistoryPagesHook
 	history     HistoryReader
 }
@@ -210,4 +213,28 @@ func (h *Hooks) History(aid string) (History, error) {
 		return History{}, errors.New("testhook: no history reader is provided")
 	}
 	return r(aid)
+}
+
+// OnCommitResponse registers a hook that runs after a commit succeeded on the server and before its response
+// reaches the caller. A hook that returns an error loses the response. Hooks run in registration order.
+func (h *Hooks) OnCommitResponse(f FailHook) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.response = append(h.response, f)
+}
+
+// CommitResponse calls the commit response hooks and returns the first error.
+func (h *Hooks) CommitResponse(pt Point) error {
+	if h == nil {
+		return nil
+	}
+	h.mu.RLock()
+	hooks := append([]FailHook(nil), h.response...)
+	h.mu.RUnlock()
+	for _, f := range hooks {
+		if err := f(pt); err != nil {
+			return err
+		}
+	}
+	return nil
 }

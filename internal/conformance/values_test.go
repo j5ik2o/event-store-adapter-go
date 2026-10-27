@@ -164,3 +164,89 @@ func TestRunValueCaseUnrepresentableSequence(t *testing.T) {
 		})
 	}
 }
+
+func TestRunFNV1a64ValueCases(t *testing.T) {
+	d, err := LoadData(dataRoot())
+	require.NoError(t, err)
+	var cases []ValueCase
+	for _, c := range d.Values {
+		if c.Operation == "fnv1a64" {
+			cases = append(cases, c)
+		}
+	}
+	require.Len(t, cases, 4)
+
+	t.Run("the four reference values of hash.md are computed from the UTF-8 input", func(t *testing.T) {
+		for _, c := range cases {
+			res := runValueCase(c)
+			assert.Equal(t, StatusSuccess, res.Status, "%s: %s", c.ID, res.Reason)
+			assert.Equal(t, c.Rules, res.Rules)
+		}
+	})
+
+	t.Run("a wrong expected value is a failure and the actual value is not copied from it", func(t *testing.T) {
+		for _, c := range cases {
+			c.Expect = map[string]any{"value": "0x0000000000000001"}
+			res := runValueCase(c)
+			assert.Equal(t, StatusFailure, res.Status, c.ID)
+			assert.NotEmpty(t, res.Reason)
+			assert.NotEqual(t, res.Expected, res.Actual, c.ID)
+		}
+	})
+
+	t.Run("an expected value that is not 0x and sixteen hexadecimal digits is a failure, not a pass", func(t *testing.T) {
+		for _, bad := range []string{"0xaf63dc4c8601ec8", "af63dc4c8601ec8c", "0XAF63DC4C8601EC8C", "-5808590958014384884", "0xaf63dc4c8601ec8cc"} {
+			c := cases[0]
+			require.Equal(t, "0xaf63dc4c8601ec8c", c.Expect["value"], "the first case is the one-letter input")
+			c.Expect = map[string]any{"value": bad}
+			res := runValueCase(c)
+			assert.Equal(t, StatusFailure, res.Status, bad)
+		}
+	})
+
+	t.Run("a hash with the top bit set is compared as an unsigned value", func(t *testing.T) {
+		c := cases[0]
+		c.Expect = map[string]any{"value": "0x" + fmt.Sprintf("%016x", uint64(0xaf63dc4c8601ec8c)^1<<63)}
+		assert.Equal(t, StatusFailure, runValueCase(c).Status, "the sign-flipped value must not equal the reference")
+	})
+}
+
+func TestRunBackendRunsTheHashTableOnlyForStoragesThatUseTheHash(t *testing.T) {
+	d, err := LoadData(dataRoot())
+	require.NoError(t, err)
+	hashIDs := map[string]bool{}
+	for _, c := range d.Values {
+		if c.Operation == "fnv1a64" {
+			hashIDs[c.ID] = true
+		}
+	}
+	require.Len(t, hashIDs, 4)
+
+	for _, name := range []string{"memory", "dynamodb", "sqlite"} {
+		results := RunBackend(t.Context(), d, &fakeBackend{name: name})
+		seen := 0
+		for _, r := range results {
+			if hashIDs[r.ID] {
+				seen++
+				assert.Equal(t, StatusNotApplicable, r.Status, "%s %s", name, r.ID)
+				assert.Contains(t, r.Reason, "Spanner", "the reason says which storages use the hash")
+			}
+		}
+		assert.Equal(t, 4, seen, name)
+	}
+
+	results := RunBackend(t.Context(), d, &fakeBackend{name: "spanner"})
+	seen := 0
+	for _, r := range results {
+		if hashIDs[r.ID] {
+			seen++
+			assert.Equal(t, StatusSuccess, r.Status, "%s: %s", r.ID, r.Reason)
+			assert.Equal(t, "spanner", r.Backend)
+		}
+	}
+	assert.Equal(t, 4, seen)
+	assert.Len(t, ApplicableCases(d, "spanner"), 79)
+	for _, id := range ApplicableCases(d, "spanner") {
+		assert.NotEqual(t, "", id)
+	}
+}

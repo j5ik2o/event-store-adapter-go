@@ -246,14 +246,22 @@ func decodeObject(t *testing.T, body string) map[string]any {
 }
 
 func TestLoadCases_OutOfScope(t *testing.T) {
-	t.Run("a scenario that targets only Spanner is read without its steps being interpreted", func(t *testing.T) {
+	t.Run("a scenario that targets only Bigtable is read without its steps being interpreted", func(t *testing.T) {
 		d := &Data{}
-		err := loadCases(d, "x.json", "scenarios", decodeObject(t, fmt.Sprintf(outOfScopeScenario, "spanner", `"seed":{"events":{},"snapshots":{}},`)), map[string]string{})
+		err := loadCases(d, "x.json", "scenarios", decodeObject(t, fmt.Sprintf(outOfScopeScenario, "bigtable", `"seed":{"events":{},"snapshots":{}},`)), map[string]string{})
 		require.NoError(t, err)
 		require.Len(t, d.Scenarios, 1)
 		assert.True(t, d.Scenarios[0].OutOfScope)
 		assert.Nil(t, d.Scenarios[0].Plan)
-		assert.Equal(t, []string{"spanner"}, d.Scenarios[0].Backends)
+		assert.Equal(t, []string{"bigtable"}, d.Scenarios[0].Backends)
+	})
+
+	t.Run("a scenario that targets only Spanner is interpreted: an unknown operation is a data error", func(t *testing.T) {
+		d := &Data{}
+		err := loadCases(d, "x.json", "scenarios", decodeObject(t, fmt.Sprintf(outOfScopeScenario, "spanner", "")), map[string]string{})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `unsupported op "holdWriteLock"`)
+		assert.Empty(t, d.Scenarios)
 	})
 
 	t.Run("a scenario that targets memory keeps rejecting an unknown operation", func(t *testing.T) {
@@ -322,9 +330,40 @@ func TestLoadData_OutOfScopeFiles(t *testing.T) {
 		assert.Equal(t, 4, seeded)
 	})
 
-	t.Run("only the scenarios without memory, dynamodb and sqlite are out of scope", func(t *testing.T) {
+	t.Run("the Spanner scenarios are read in scope with their settings, seeds and abort faults", func(t *testing.T) {
+		byID := map[string]ScenarioCase{}
+		spannerOnly := 0
 		for _, c := range d.Scenarios {
-			provided := contains(c.Backends, "memory") || contains(c.Backends, "dynamodb") || contains(c.Backends, "sqlite")
+			if len(c.Backends) == 1 && c.Backends[0] == "spanner" {
+				spannerOnly++
+				assert.False(t, c.OutOfScope, c.ID)
+				require.NotNil(t, c.Plan, c.ID)
+				byID[c.ID] = c
+			}
+		}
+		assert.Equal(t, 14, spannerOnly, "spanner/commit.json (3) and spanner/configuration.json (11)")
+
+		retry := byID["spanner-aborted-retry-within-limit"].Plan
+		require.NotNil(t, retry.Store.TransactionRetryLimit)
+		assert.Equal(t, int64(3), *retry.Store.TransactionRetryLimit)
+		require.Len(t, retry.Faults, 1)
+		assert.Equal(t, "transaction-aborted", retry.Faults[0].Kind)
+
+		grace := byID["spanner-seeded-ttl-grace-policy-mismatch"].Plan
+		require.NotNil(t, grace.Store.TTLGraceDays)
+		assert.Equal(t, int64(7), *grace.Store.TTLGraceDays)
+		require.NotNil(t, grace.SeedConfiguration)
+		require.NotNil(t, grace.SeedRowDeletionPolicyDays)
+		assert.Equal(t, int64(8), *grace.SeedRowDeletionPolicyDays)
+
+		noPolicy := byID["spanner-seeded-configuration-match"].Plan
+		require.NotNil(t, noPolicy.SeedConfiguration)
+		assert.Nil(t, noPolicy.SeedRowDeletionPolicyDays, "row_deletion_policy_days null means there is no policy")
+	})
+
+	t.Run("only the scenarios without memory, dynamodb, sqlite and spanner are out of scope", func(t *testing.T) {
+		for _, c := range d.Scenarios {
+			provided := contains(c.Backends, "memory") || contains(c.Backends, "dynamodb") || contains(c.Backends, "sqlite") || contains(c.Backends, "spanner")
 			assert.Equal(t, !provided, c.OutOfScope, c.ID)
 			assert.Equal(t, provided, c.Plan != nil, c.ID)
 		}
@@ -378,15 +417,16 @@ func TestLoadCases_StoreSettings(t *testing.T) {
 		key, value := key, value
 		store := `{"retention_count":null,"retention_mode":"delete","` + key + `":` + value + `}`
 
-		t.Run("a scenario that targets only Spanner is read with the setting "+key, func(t *testing.T) {
-			d, err := load(t, `["spanner"]`, store)
+		t.Run("a scenario that targets only Bigtable is read with the setting "+key, func(t *testing.T) {
+			d, err := load(t, `["bigtable"]`, store)
 			require.NoError(t, err)
 			require.Len(t, d.Scenarios, 1)
 			assert.True(t, d.Scenarios[0].OutOfScope)
 			assert.Nil(t, d.Scenarios[0].Plan)
 		})
 
-		if key == "lock_wait_milliseconds" {
+		switch key {
+		case "lock_wait_milliseconds":
 			t.Run("a scenario that targets only SQLite interprets the setting "+key, func(t *testing.T) {
 				d, err := load(t, `["sqlite"]`, store)
 				require.NoError(t, err)
@@ -395,7 +435,21 @@ func TestLoadCases_StoreSettings(t *testing.T) {
 				require.NotNil(t, d.Scenarios[0].Plan.Store.LockWaitMilliseconds)
 				assert.Equal(t, int64(50), *d.Scenarios[0].Plan.Store.LockWaitMilliseconds)
 			})
-		} else {
+		case "transaction_retry_limit", "ttl_grace_days":
+			t.Run("a scenario that targets only Spanner interprets the setting "+key, func(t *testing.T) {
+				spannerStore := `{"retention_count":1,"retention_mode":"ttl","ttl_grace_days":7,"transaction_retry_limit":3}`
+				d, err := load(t, `["spanner"]`, spannerStore)
+				require.NoError(t, err)
+				require.Len(t, d.Scenarios, 1)
+				require.NotNil(t, d.Scenarios[0].Plan)
+				require.NotNil(t, d.Scenarios[0].Plan.Store.TTLGraceDays)
+				assert.Equal(t, int64(7), *d.Scenarios[0].Plan.Store.TTLGraceDays)
+				require.NotNil(t, d.Scenarios[0].Plan.Store.TransactionRetryLimit)
+				assert.Equal(t, int64(3), *d.Scenarios[0].Plan.Store.TransactionRetryLimit)
+			})
+		}
+
+		if key != "lock_wait_milliseconds" {
 			t.Run("a scenario that targets only SQLite rejects the setting "+key, func(t *testing.T) {
 				d, err := load(t, `["sqlite"]`, store)
 				require.Error(t, err)
@@ -403,8 +457,16 @@ func TestLoadCases_StoreSettings(t *testing.T) {
 				assert.Empty(t, d.Scenarios)
 			})
 		}
+		if key != "transaction_retry_limit" && key != "ttl_grace_days" {
+			t.Run("a scenario that targets only Spanner rejects the setting "+key, func(t *testing.T) {
+				d, err := load(t, `["spanner"]`, store)
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), key)
+				assert.Empty(t, d.Scenarios)
+			})
+		}
 
-		for _, backends := range []string{`["memory"]`, `["dynamodb"]`, `["memory","dynamodb","sqlite"]`} {
+		for _, backends := range []string{`["memory"]`, `["dynamodb"]`, `["memory","dynamodb","sqlite"]`, `["memory","spanner"]`} {
 			backends := backends
 			t.Run("a scenario that targets "+backends+" rejects the setting "+key, func(t *testing.T) {
 				d, err := load(t, backends, store)
@@ -501,6 +563,63 @@ func TestLoadCases_SQLiteOnlyMisuse(t *testing.T) {
 		{"no persist expects a storage error while the lock is held",
 			sqliteMisuseCase(`["sqlite"]`, `["SQ-7"]`, lockStore, "", stepPersist1, stepHold, stepFailLock, stepRelease, stepPersist2),
 			"no persist expects a storage error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, err := load(tc.body)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+			assert.Empty(t, d.Scenarios)
+		})
+	}
+}
+
+// spannerAbortCase builds a scenario with a transaction-aborted fault. Each rejection test below changes one thing.
+func spannerAbortCase(backends, rules, store, phase string) string {
+	return fmt.Sprintf(`{"cases":[{
+  "id":"a-1","rules":%s,"description":"d","backends":%s,
+  "store":%s,
+  "fixtures":{"events":{
+    "e1":{"aggregate_id":{"type_name":"Order","value":"9"},"seq_nr":1,"occurred_at":"2026-10-05T00:00:00.123456789Z","payload":{"number":1},"manifest":""},
+    "e2":{"aggregate_id":{"type_name":"Order","value":"9"},"seq_nr":2,"occurred_at":"2026-10-05T00:00:00.123456789Z","payload":{"number":2},"manifest":""}},
+    "snapshots":{}},
+  "steps":[{"op":"persistEvent","arguments":{"event":"e1"},"expect":{"result":"success"}},{"op":"persistEvent","arguments":{"event":"e2"},"expect":{"result":"success"}}],
+  "faults":[{"operation":2,"phase":%q,"kind":"transaction-aborted","details":{"message":"STORAGE_SENTINEL"},"repeat":{"mode":"count","count":2},"injection":"replace-request"}]
+}]}`, rules, backends, store, phase)
+}
+
+func TestLoadCases_SpannerOnlyMisuse(t *testing.T) {
+	load := func(body string) (*Data, error) {
+		d := &Data{}
+		err := loadCases(d, "x.json", "scenarios", decodeObject(t, body), map[string]string{})
+		return d, err
+	}
+	const retryStore = `{"retention_count":null,"retention_mode":"delete","transaction_retry_limit":3}`
+
+	t.Run("accepted form", func(t *testing.T) {
+		d, err := load(spannerAbortCase(`["spanner"]`, `["SPN-7"]`, retryStore, "commit"))
+		require.NoError(t, err)
+		require.Len(t, d.Scenarios, 1)
+		require.NotNil(t, d.Scenarios[0].Plan)
+		assert.Equal(t, "transaction-aborted", d.Scenarios[0].Plan.Faults[0].Kind)
+	})
+
+	for _, tc := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{"a transaction-aborted fault outside a scenario that targets only spanner",
+			spannerAbortCase(`["memory","spanner"]`, `["SPN-7"]`, plainStore, "commit"), "transaction-aborted"},
+		{"a transaction-aborted fault in a scenario for another storage",
+			spannerAbortCase(`["sqlite"]`, `["SPN-7"]`, plainStore, "commit"), "transaction-aborted"},
+		{"a transaction-aborted fault without the rule SPN-7",
+			spannerAbortCase(`["spanner"]`, `["E-1"]`, retryStore, "commit"), "SPN-7"},
+		{"a transaction-aborted fault without transaction_retry_limit",
+			spannerAbortCase(`["spanner"]`, `["SPN-7"]`, plainStore, "commit"), "transaction_retry_limit"},
+		{"a transaction-aborted fault outside the commit phase",
+			spannerAbortCase(`["spanner"]`, `["SPN-7"]`, retryStore, "read-events"), "transaction-aborted"},
+		{"retention_mode ttl without ttl_grace_days in a scenario that targets only spanner",
+			spannerAbortCase(`["spanner"]`, `["SPN-16"]`, `{"retention_count":1,"retention_mode":"ttl"}`, "commit"), "ttl_grace_days"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d, err := load(tc.body)

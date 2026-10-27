@@ -10,7 +10,7 @@ import (
 // Backend is the boundary between the runner and a storage backend. It creates stores for
 // scenarios. Actual adapters live in the external test package.
 type Backend interface {
-	// Name is "memory", "dynamodb" or "sqlite".
+	// Name is "memory", "dynamodb", "sqlite" or "spanner".
 	Name() string
 	// Injectable tells whether the backend can inject the fault. A scenario with a fault
 	// that cannot be injected is reported as unverified.
@@ -29,7 +29,7 @@ type ScenarioOwner interface {
 }
 
 // ConfigurationSeeder is implemented by a backend whose destination keeps the store configuration
-// (SQLite). SeedConfiguration replaces the configuration the destination holds with the values of the
+// (SQLite and Spanner). SeedConfiguration replaces the configuration the destination holds with the values of the
 // scenario (seed.configuration) after the destination is provisioned and before the store is opened.
 type ConfigurationSeeder interface {
 	SeedConfiguration(ctx context.Context, values map[string]any) error
@@ -91,6 +91,10 @@ type StoreConfig struct {
 	TTLGraceSeconds *int64
 	LayoutVersion   *int64
 	RetryLimit      *int64
+	// TTLGraceDays is the grace period in days of a Spanner TTL store (ttl_grace_days); it is not ttl_grace_seconds.
+	TTLGraceDays *int64
+	// TransactionRetryLimit is the number of re-runs of a Spanner transaction after an abort (the first attempt is not counted).
+	TransactionRetryLimit *int64
 	// ChangeFeed asks for a change feed. An absent key means false.
 	ChangeFeed bool
 	// LockWaitMilliseconds is the busy wait of a SQLite store. It is nil when the key is absent.

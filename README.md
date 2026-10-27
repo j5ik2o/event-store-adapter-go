@@ -9,7 +9,7 @@
 
 ## Overview
 
-This library provides a synchronous event store for CQRS/Event Sourcing with Memory, DynamoDB and SQLite backends.
+This library provides a synchronous event store for CQRS/Event Sourcing with Memory, DynamoDB, SQLite and Spanner backends.
 
 [日本語](./README.ja.md)
 
@@ -192,6 +192,30 @@ func openSQLite(ctx context.Context, path string) (*sqlite.Store, eventstore.Eve
 
 Call `Store.Close` when finished. Use a local file system. TTL retention and a change feed are configuration errors. An append takes the write lock before it compares the head; if another connection holds the lock for longer than `Config.LockWait` (default 5 seconds), the append fails with a storage error.
 
+### Spanner
+
+The Spanner storage keeps events and snapshots in five tables of one Cloud Spanner database (GoogleSQL dialect), in the same row format as the JavaScript v5 implementation; see [SPANNER_DATABASE_SCHEMA.md](docs/SPANNER_DATABASE_SCHEMA.md). You create the tables and one configuration row yourself, once, with the DDL of that document; the library never runs DDL. Supply a `*spanner.Client` from `cloud.google.com/go/spanner`, which you close yourself. Because the layout is provisioned outside the program, the same factory runs at the first start and at every restart. With the domain types above:
+
+```go
+import (
+    "context"
+    gspanner "cloud.google.com/go/spanner"
+    eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
+    "github.com/j5ik2o/event-store-adapter-go/v5/spanner"
+)
+
+// Run at every start, the first one included. New verifies the layout and never changes it.
+func openSpanner(ctx context.Context, client *gspanner.Client) (eventstore.EventStore[orderEvent, orderState], error) {
+    keep, err := eventstore.KeepLatest(3)
+    if err != nil { return nil, err }
+    return spanner.New(ctx, client, spanner.Config{TablePrefix: "esa"},
+        eventstore.NewJSONSerializer[orderEvent](), eventstore.NewJSONSerializer[orderState](),
+        eventstore.WithRetentionCount(keep))
+}
+```
+
+`TablePrefix` derives the five table names. The retention count and mode must agree with the configuration row. A change feed is a configuration error. Appends run in SERIALIZABLE transactions and are re-run after an abort up to `Config.TransactionRetryLimit` times (default 5); reads use one strongly consistent read-only transaction. If the response of a commit is lost, the append fails with a storage error whose outcome is unknown.
+
 ## Serialization
 
 `Serializer[T]` serializes only the payload or the aggregate state; envelope metadata is not passed to it. Domain types need no library-specific interface. Implement `Serialize(value T) ([]byte, error)` and `Deserialize(data []byte) (T, error)`.
@@ -202,7 +226,7 @@ An error returned by a serializer is classified as `SerializationError` (`KindSe
 
 ## Retention
 
-Omitting the retention count, or supplying `WithRetentionCount(NoRetention())`, keeps the current snapshot without history. `KeepLatest(n)` requires `n >= 1`; current snapshots do not count toward `n`. Memory and SQLite support delete retention only. DynamoDB supports `RetentionDelete` (default) and `RetentionTTL`, with `WithTTLGraceSeconds` specifying a non-negative grace period in seconds.
+Omitting the retention count, or supplying `WithRetentionCount(NoRetention())`, keeps the current snapshot without history. `KeepLatest(n)` requires `n >= 1`; current snapshots do not count toward `n`. Memory and SQLite support delete retention only. DynamoDB supports `RetentionDelete` (default) and `RetentionTTL`, with `WithTTLGraceSeconds` specifying a non-negative grace period in seconds. Spanner supports `RetentionDelete` (default) and `RetentionTTL`; its TTL grace period is `Config.TTLGraceDays` in days, and a non-zero `WithTTLGraceSeconds` is a configuration error there.
 
 Retention runs synchronously after a successful snapshot/history write. Failure is logged and can also be observed through `WithRetentionFailureHandler(func(context.Context, error))`; the committed write still returns success.
 
@@ -218,7 +242,7 @@ See [DYNAMODB_DATABASE_SCHEMA.md](docs/DYNAMODB_DATABASE_SCHEMA.md) for attribut
 
 The `conformance/` directory holds the shared conformance data (version `1.3.0`, see [conformance/README.md](conformance/README.md)). The `lint` job in CI verifies it with `tools/conformance/manifest.py verify` and SHA-256 checks.
 
-The `conformance` job in CI runs `go test -count=1 -v ./internal/conformance/...` with `CONFORMANCE_REPORT` set, and uploads `conformance-report.json` as an artifact. The runner covers the Memory, DynamoDB and SQLite storages; DynamoDB uses DynamoDB Local started in a container, and SQLite uses local files. A required SQLite case that is not executed fails the job. Without `CONFORMANCE_REPORT`, the test is skipped.
+The `conformance` job in CI runs `go test -count=1 -v ./internal/conformance/...` with `CONFORMANCE_REPORT` set, and uploads `conformance-report.json` as an artifact. The runner covers the Memory, DynamoDB, SQLite and Spanner storages; DynamoDB uses DynamoDB Local and Spanner uses the Cloud Spanner emulator, each started in a container, and SQLite uses local files. A required SQLite or Spanner case that is not executed fails the job. Without `CONFORMANCE_REPORT`, the test is skipped.
 
 ## License
 
