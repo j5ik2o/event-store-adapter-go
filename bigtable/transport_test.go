@@ -228,21 +228,24 @@ func TestInterruptedReadRows(t *testing.T) {
 		require.NoError(t, writer.PersistEvent(t.Context(), eventAt(t, id, seq, big+string(rune('a'+seq)))))
 	}
 	recorder := &requestRecorder{}
-	var streams atomic.Int64
+	var streams, cuts atomic.Int64
+	var armed atomic.Bool // set after New returns so the configuration reads are never cut
 	cutStream := func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 		stream, err := streamer(ctx, desc, cc, method, opts...)
-		if err != nil || !strings.HasSuffix(method, "/ReadRows") {
+		if err != nil || !armed.Load() || !strings.HasSuffix(method, "/ReadRows") {
 			return stream, err
 		}
-		if streams.Add(1) != 2 { // the first ReadRows is the head read; the second is the journal range
+		if streams.Add(1) != 2 { // the first ReadRows after New is the head read; the second is the journal range
 			return stream, nil
 		}
-		return &cuttingStream{ClientStream: stream, remaining: 1}, nil
+		return &cuttingStream{ClientStream: stream, remaining: 1, cuts: &cuts}, nil
 	}
 	data := newDataClient(t, connect(t, interceptors(recorder, nil, cutStream)...))
 	es, ss := serializers()
 	reader, err := bigtable.New(t.Context(), data, l.admin, l.config(), es, ss)
 	require.NoError(t, err)
+	armed.Store(true)
+	before := recorder.countOf("ReadRows")
 
 	events, err := reader.GetEventsByIDSinceSeqNr(t.Context(), id, 1)
 
@@ -251,16 +254,19 @@ func TestInterruptedReadRows(t *testing.T) {
 	for i, e := range events {
 		assert.Equal(t, eventstore.SeqNr(i+1), e.SeqNr(), "no event is lost or repeated across the resumption")
 	}
-	assert.GreaterOrEqual(t, recorder.countOf("ReadRows"), 3, "head read, the interrupted journal read, and the resumed read")
+	assert.Equal(t, int64(1), cuts.Load(), "the journal range stream was cut exactly once")
+	assert.GreaterOrEqual(t, recorder.countOf("ReadRows")-before, 3, "head read, the interrupted journal read, and the resumed read")
 }
 
 type cuttingStream struct {
 	grpc.ClientStream
 	remaining int
+	cuts      *atomic.Int64
 }
 
 func (s *cuttingStream) RecvMsg(m any) error {
 	if s.remaining == 0 {
+		s.cuts.Add(1)
 		return status.Error(codes.Unavailable, "stream cut")
 	}
 	s.remaining--

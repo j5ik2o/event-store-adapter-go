@@ -247,7 +247,7 @@ func openBigtable(ctx context.Context, data *gbigtable.Client, admin *gbigtable.
 }
 ```
 
-`Initialize` fails with a configuration error when either table already has a configuration row, so call it only once; the schema document explains how to recover from an interrupted initialization. The retention count and `Config.EnvelopeLimitBytes` must agree with the configuration rows. TTL retention and a change feed are configuration errors. The commit point of an append is a conditional write on the head row; if its response is lost, the append fails with a storage error whose outcome is unknown and the write is not repeated. A data client built over your own gRPC connection must allow receiving messages as large as the envelope limit (up to 8 MiB).
+`Initialize` fails with a configuration error when either table already has a configuration row, so call it only once; the schema document explains how to recover from an interrupted initialization. The retention count and `Config.EnvelopeLimitBytes` must agree with the configuration rows. TTL retention and a change feed are configuration errors. The commit point of an append is a conditional write on the head row; if its response is lost, the append fails with a storage error whose outcome is unknown and the write is not repeated. A data client built over your own gRPC connection must allow received messages as large as `Config.EnvelopeLimitBytes` plus the row overhead (row key and cell metadata), because the default gRPC limit is 4 MiB.
 
 ## Serialization
 
@@ -259,7 +259,7 @@ An error returned by a serializer is classified as `SerializationError` (`KindSe
 
 ## Retention
 
-Omitting the retention count, or supplying `WithRetentionCount(NoRetention())`, keeps the current snapshot without history. `KeepLatest(n)` requires `n >= 1`; current snapshots do not count toward `n`. Memory and SQLite support delete retention only. DynamoDB supports `RetentionDelete` (default) and `RetentionTTL`, with `WithTTLGraceSeconds` specifying a non-negative grace period in seconds. Spanner supports `RetentionDelete` (default) and `RetentionTTL`; its TTL grace period is `Config.TTLGraceDays` in days, and a non-zero `WithTTLGraceSeconds` is a configuration error there. Bigtable supports delete retention only.
+Omitting the retention count, or supplying `WithRetentionCount(NoRetention())`, keeps the current snapshot without history. `KeepLatest(n)` requires `n >= 1`; the current snapshot is also stored in the history and counts toward `n`, so the newest `n` snapshots are kept. Memory and SQLite support delete retention only. DynamoDB supports `RetentionDelete` (default) and `RetentionTTL`, with `WithTTLGraceSeconds` specifying a non-negative grace period in seconds. Spanner supports `RetentionDelete` (default) and `RetentionTTL`; its TTL grace period is `Config.TTLGraceDays` in days, and a non-zero `WithTTLGraceSeconds` is a configuration error there. Bigtable supports delete retention only.
 
 Retention runs synchronously after a successful snapshot/history write. Failure is logged and can also be observed through `WithRetentionFailureHandler(func(context.Context, error))`; the committed write still returns success.
 

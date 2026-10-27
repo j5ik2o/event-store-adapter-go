@@ -251,7 +251,7 @@ func openBigtable(ctx context.Context, data *gbigtable.Client, admin *gbigtable.
 }
 ```
 
-どちらかの表に設定の行がすでにあると `Initialize` は設定エラーで失敗するので、一度だけ呼びます。初期化が途中で止まったときの戻し方は、スキーマ文書にあります。保持件数と `Config.EnvelopeLimitBytes` は、設定の行と一致していなければなりません。期限切れ方式と変更フィードは設定エラーです。追記の確定点は head の行への条件付き更新です。その応答が失われたときの追記は、結果が分からない保存先エラーで失敗し、書き込みは繰り返しません。自分の gRPC 接続の上にデータのクライアントを作るときは、封筒の上限（最大 8 MiB）の大きさのメッセージを受け取れるように設定してください。
+どちらかの表に設定の行がすでにあると `Initialize` は設定エラーで失敗するので、一度だけ呼びます。初期化が途中で止まったときの戻し方は、スキーマ文書にあります。保持件数と `Config.EnvelopeLimitBytes` は、設定の行と一致していなければなりません。期限切れ方式と変更フィードは設定エラーです。追記の確定点は head の行への条件付き更新です。その応答が失われたときの追記は、結果が分からない保存先エラーで失敗し、書き込みは繰り返しません。自分の gRPC 接続の上にデータのクライアントを作るときは、`Config.EnvelopeLimitBytes` に行の付加情報（行キーとセルのメタデータ）を足した大きさのメッセージを受け取れるように設定してください（gRPC の既定は 4 MiB です）。
 
 ## 直列化
 
@@ -263,7 +263,7 @@ serializer が返したエラーは `SerializationError`（`KindSerialization`�
 
 ## 保持
 
-保持件数を省略するか `WithRetentionCount(NoRetention())` を渡すと、current snapshot だけを保存して履歴を作りません。`KeepLatest(n)` は `n >= 1` を要求し、current snapshot は件数に含めません。Memory と SQLite は削除方式だけ、DynamoDB は `RetentionDelete`（既定）と `RetentionTTL` に対応します。`WithTTLGraceSeconds` は0以上の猶予秒を指定します。Spanner も `RetentionDelete`（既定）と `RetentionTTL` に対応し、期限切れ方式の猶予は `Config.TTLGraceDays`（日数）で指定します。Spanner で `WithTTLGraceSeconds` に 0 以外を渡すと設定エラーです。Bigtable は削除方式だけに対応します。
+保持件数を省略するか `WithRetentionCount(NoRetention())` を渡すと、current snapshot だけを保存して履歴を作りません。`KeepLatest(n)` は `n >= 1` を要求し、current snapshot も履歴に入り、`n` 件に数えられるので、最新の `n` 件のスナップショットが残ります。Memory と SQLite は削除方式だけ、DynamoDB は `RetentionDelete`（既定）と `RetentionTTL` に対応します。`WithTTLGraceSeconds` は0以上の猶予秒を指定します。Spanner も `RetentionDelete`（既定）と `RetentionTTL` に対応し、期限切れ方式の猶予は `Config.TTLGraceDays`（日数）で指定します。Spanner で `WithTTLGraceSeconds` に 0 以外を渡すと設定エラーです。Bigtable は削除方式だけに対応します。
 
 保持処理は snapshot と履歴の確定後に同期で行います。失敗はログに記録され、`WithRetentionFailureHandler(func(context.Context, error))` でも通知できます。確定済み書込は成功のまま返ります。
 

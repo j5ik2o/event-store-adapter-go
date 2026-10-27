@@ -119,9 +119,7 @@ func TestReadReportsAMalformedHeadOrEnvelopeAsAStorageError(t *testing.T) {
 	_, err := entry.GetEventsByIDSinceSeqNr(t.Context(), id, 1)
 	requireKind(t, err, eventstore.KindStorage)
 	_, err = entry.GetLatestSnapshotByID(t.Context(), id)
-	if err != nil {
-		requireKind(t, err, eventstore.KindStorage)
-	}
+	requireKind(t, err, eventstore.KindStorage)
 }
 
 func TestReadFailsWhileDeserializingAPayloadAsASerializationError(t *testing.T) {
