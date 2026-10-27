@@ -11,14 +11,18 @@ const primaryStore = "primary"
 
 // ScenarioPlan is a scenario with its structure read and its references checked.
 type ScenarioPlan struct {
-	Store    StoreConfig
-	Seed     []map[string]any
-	Init     *InitPlan
-	Events   map[string]eventFixture
-	Snaps    map[string]snapshotFixture
-	Steps    []StepPlan
-	Faults   []FaultSpec
-	Requires []string
+	Store StoreConfig
+	Seed  []map[string]any
+	// onlySQLite is true when the backends of the scenario are exactly [sqlite]: only then are the SQLite-only operations known.
+	onlySQLite bool
+	// SeedConfiguration is seed.configuration: the configuration a SQLite destination holds before the store is opened.
+	SeedConfiguration map[string]any
+	Init              *InitPlan
+	Events            map[string]eventFixture
+	Snaps             map[string]snapshotFixture
+	Steps             []StepPlan
+	Faults            []FaultSpec
+	Requires          []string
 	// ClockStart is the clock of the scenario (clock.epoch_seconds), if any.
 	ClockStart *int64
 }
@@ -90,6 +94,9 @@ type snapshotFixture struct {
 func parseScenario(m map[string]any) (*ScenarioPlan, error) {
 	p := &ScenarioPlan{Events: map[string]eventFixture{}, Snaps: map[string]snapshotFixture{}}
 	var err error
+	if backends, listErr := stringList(m["backends"]); listErr == nil {
+		p.onlySQLite = len(backends) == 1 && backends[0] == "sqlite"
+	}
 
 	store, ok := m["store"].(map[string]any)
 	if !ok {
@@ -120,16 +127,29 @@ func parseScenario(m map[string]any) (*ScenarioPlan, error) {
 		if !ok {
 			return nil, fmt.Errorf("seed is not an object")
 		}
-		items, ok := sm["items"].([]any)
-		if !ok {
-			return nil, fmt.Errorf("seed.items is not an array")
+		_, hasItems := sm["items"]
+		configuration, hasConfiguration := sm["configuration"]
+		if hasItems == hasConfiguration {
+			return nil, fmt.Errorf("seed needs exactly one of items and configuration")
 		}
-		for i, it := range items {
-			im, ok := it.(map[string]any)
+		if hasConfiguration {
+			cm, ok := configuration.(map[string]any)
 			if !ok {
-				return nil, fmt.Errorf("seed.items[%d] is not an object", i)
+				return nil, fmt.Errorf("seed.configuration is not an object")
 			}
-			p.Seed = append(p.Seed, im)
+			p.SeedConfiguration = cm
+		} else {
+			items, ok := sm["items"].([]any)
+			if !ok {
+				return nil, fmt.Errorf("seed.items is not an array")
+			}
+			for i, it := range items {
+				im, ok := it.(map[string]any)
+				if !ok {
+					return nil, fmt.Errorf("seed.items[%d] is not an object", i)
+				}
+				p.Seed = append(p.Seed, im)
+			}
 		}
 	}
 
@@ -220,6 +240,8 @@ var storeConfigKeys = map[string]bool{
 	"layout_version":    true,
 	"retry_limit":       true,
 	"change_feed":       true,
+
+	"lock_wait_milliseconds": true,
 }
 
 func parseStoreConfig(m map[string]any) (StoreConfig, error) {
@@ -254,6 +276,9 @@ func parseStoreConfig(m map[string]any) (StoreConfig, error) {
 		return c, err
 	}
 	if c.RetryLimit, err = optInt64(m, "retry_limit"); err != nil {
+		return c, err
+	}
+	if c.LockWaitMilliseconds, err = optInt64(m, "lock_wait_milliseconds"); err != nil {
 		return c, err
 	}
 	if v, present := m["change_feed"]; present {
@@ -405,6 +430,13 @@ func parseStep(p *ScenarioPlan, v any) (StepPlan, error) {
 			}
 		}
 		s.AID = p.Events[s.Event].AID
+	case "holdWriteLock", "releaseWriteLock":
+		if !p.onlySQLite {
+			return s, fmt.Errorf("unsupported op %q", s.Op)
+		}
+		if len(args) != 0 || m["store"] != nil {
+			return s, fmt.Errorf("%s takes no arguments and no store", s.Op)
+		}
 	case "getLatestSnapshotById":
 		if s.AID, err = parseAID(args["aggregate_id"]); err != nil {
 			return s, err
@@ -567,4 +599,56 @@ func parseMutation(p *ScenarioPlan, s *StepPlan, args map[string]any) error {
 	}
 	// Trial run on a copy: the pointer must exist and the value must differ from the current one.
 	return ReplaceAtPointer(deepCopy(p.Events[target].Payload), s.Pointer, s.Value)
+}
+
+// checkSQLiteOnlyUse rejects the misuse that conformance/README.md defines as a data error: lock_wait_milliseconds and
+// seed.configuration are used by a scenario whose backends are exactly ["sqlite"], and a scenario that holds the write lock
+// releases it before it ends, names the rule SQ-7, sets store.lock_wait_milliseconds and holds the lock while a persist
+// that is expected to fail with a storage error runs. Whether holdWriteLock and releaseWriteLock may appear at all is
+// decided earlier by parseStep, which keeps rejecting them in other scenarios as an unsupported operation.
+func checkSQLiteOnlyUse(p *ScenarioPlan, backends, rules []string) error {
+	onlySQLite := len(backends) == 1 && backends[0] == "sqlite"
+	if p.Store.LockWaitMilliseconds != nil && !onlySQLite {
+		return fmt.Errorf("lock_wait_milliseconds is only for a scenario whose backends are exactly [sqlite]")
+	}
+	if p.SeedConfiguration != nil && !onlySQLite {
+		return fmt.Errorf("seed.configuration is only for a scenario whose backends are exactly [sqlite]")
+	}
+	held, failedWhileHeld, usesLock := false, false, false
+	for _, step := range p.Steps {
+		switch step.Op {
+		case "holdWriteLock":
+			usesLock = true
+			if held {
+				return fmt.Errorf("holdWriteLock while the lock is already held")
+			}
+			held = true
+		case "releaseWriteLock":
+			usesLock = true
+			if !held {
+				return fmt.Errorf("releaseWriteLock without a held lock")
+			}
+			held = false
+		case "persistEvent", "persistEventAndSnapshot":
+			if held && step.Expect.Kind == "error" && step.Expect.Error != nil && step.Expect.Error.Category == "storage" {
+				failedWhileHeld = true
+			}
+		}
+	}
+	if !usesLock {
+		return nil
+	}
+	if !contains(rules, "SQ-7") {
+		return fmt.Errorf("a scenario that holds the write lock needs the rule SQ-7")
+	}
+	if p.Store.LockWaitMilliseconds == nil {
+		return fmt.Errorf("a scenario that holds the write lock needs store.lock_wait_milliseconds")
+	}
+	if held {
+		return fmt.Errorf("the scenario ends while the write lock is held")
+	}
+	if !failedWhileHeld {
+		return fmt.Errorf("no persist expects a storage error while the write lock is held")
+	}
+	return nil
 }

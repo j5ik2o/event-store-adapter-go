@@ -10,7 +10,7 @@ import (
 // Backend is the boundary between the runner and a storage backend. It creates stores for
 // scenarios. Actual adapters live in the external test package.
 type Backend interface {
-	// Name is "memory" or "dynamodb".
+	// Name is "memory", "dynamodb" or "sqlite".
 	Name() string
 	// Injectable tells whether the backend can inject the fault. A scenario with a fault
 	// that cannot be injected is reported as unverified.
@@ -26,6 +26,21 @@ type Backend interface {
 // Cleanup belongs to the scenario even when public construction fails.
 type ScenarioOwner interface {
 	Prepare(context.Context, *ScenarioPlan) (Backend, func() error, error)
+}
+
+// ConfigurationSeeder is implemented by a backend whose destination keeps the store configuration
+// (SQLite). SeedConfiguration replaces the configuration the destination holds with the values of the
+// scenario (seed.configuration) after the destination is provisioned and before the store is opened.
+type ConfigurationSeeder interface {
+	SeedConfiguration(ctx context.Context, values map[string]any) error
+}
+
+// WriteLockHolder is implemented by a backend whose destination has one write lock for the whole file
+// (SQLite). HoldWriteLock takes that lock from a connection other than the store's, and keeps it until
+// ReleaseWriteLock.
+type WriteLockHolder interface {
+	HoldWriteLock(ctx context.Context) error
+	ReleaseWriteLock(ctx context.Context) error
 }
 
 // StoreCreator is implemented by a backend that can create a second store in the middle of a
@@ -78,6 +93,8 @@ type StoreConfig struct {
 	RetryLimit      *int64
 	// ChangeFeed asks for a change feed. An absent key means false.
 	ChangeFeed bool
+	// LockWaitMilliseconds is the busy wait of a SQLite store. It is nil when the key is absent.
+	LockWaitMilliseconds *int64
 	// ClockEpochSeconds is the initial clock of the scenario, if it has one.
 	ClockEpochSeconds *int64
 }

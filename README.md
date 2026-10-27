@@ -9,7 +9,7 @@
 
 ## Overview
 
-This library provides a synchronous event store for CQRS/Event Sourcing with Memory and DynamoDB backends.
+This library provides a synchronous event store for CQRS/Event Sourcing with Memory, DynamoDB and SQLite backends.
 
 [日本語](./README.ja.md)
 
@@ -160,6 +160,32 @@ func openDynamoDB(ctx context.Context, client *awsdb.Client) (eventstore.EventSt
 
 The factory checks configuration items in all three tables and creates them transactionally when all are absent. It does not create tables. Reads use strongly consistent BatchGetItem and journal Query requests and consume every page. The head and current snapshot read is not atomic; a concurrent write can return different snapshot and head numbers.
 
+### SQLite
+
+The SQLite storage keeps events and snapshots in one local database file, in the same five-table layout that the Rust v5 implementation uses; see [SQLITE_DATABASE_SCHEMA.md](docs/SQLITE_DATABASE_SCHEMA.md). Initialize a new file once with `sqlite.Initialize`, then open it with `sqlite.Open` and connect serializers with `sqlite.New`. `Open` never creates or initializes a file. With the domain types above:
+
+```go
+import (
+    "context"
+    eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
+    "github.com/j5ik2o/event-store-adapter-go/v5/sqlite"
+)
+
+func openSQLite(ctx context.Context, path string) (*sqlite.Store, eventstore.EventStore[orderEvent, orderState], error) {
+    keep, err := eventstore.KeepLatest(2)
+    if err != nil { return nil, nil, err }
+    opts := []eventstore.Option{eventstore.WithRetentionCount(keep)}
+    if err := sqlite.Initialize(ctx, path, sqlite.Config{}, opts...); err != nil { return nil, nil, err }
+    store, err := sqlite.Open(ctx, path, sqlite.Config{}, opts...)
+    if err != nil { return nil, nil, err }
+    es, err := sqlite.New(store, eventstore.NewJSONSerializer[orderEvent](), eventstore.NewJSONSerializer[orderState]())
+    if err != nil { _ = store.Close(); return nil, nil, err }
+    return store, es, nil
+}
+```
+
+Call `Store.Close` when finished. Use a local file system. TTL retention and a change feed are configuration errors. An append takes the write lock before it compares the head; if another connection holds the lock for longer than `Config.LockWait` (default 5 seconds), the append fails with a storage error.
+
 ## Serialization
 
 `Serializer[T]` serializes only the payload or the aggregate state; envelope metadata is not passed to it. Domain types need no library-specific interface. Implement `Serialize(value T) ([]byte, error)` and `Deserialize(data []byte) (T, error)`.
@@ -170,7 +196,7 @@ An error returned by a serializer is classified as `SerializationError` (`KindSe
 
 ## Retention
 
-Omitting the retention count, or supplying `WithRetentionCount(NoRetention())`, keeps the current snapshot without history. `KeepLatest(n)` requires `n >= 1`; current snapshots do not count toward `n`. Memory supports delete retention. DynamoDB supports `RetentionDelete` (default) and `RetentionTTL`, with `WithTTLGraceSeconds` specifying a non-negative grace period in seconds.
+Omitting the retention count, or supplying `WithRetentionCount(NoRetention())`, keeps the current snapshot without history. `KeepLatest(n)` requires `n >= 1`; current snapshots do not count toward `n`. Memory and SQLite support delete retention only. DynamoDB supports `RetentionDelete` (default) and `RetentionTTL`, with `WithTTLGraceSeconds` specifying a non-negative grace period in seconds.
 
 Retention runs synchronously after a successful snapshot/history write. Failure is logged and can also be observed through `WithRetentionFailureHandler(func(context.Context, error))`; the committed write still returns success.
 
@@ -186,7 +212,7 @@ See [DYNAMODB_DATABASE_SCHEMA.md](docs/DYNAMODB_DATABASE_SCHEMA.md) for attribut
 
 The `conformance/` directory holds the shared conformance data (version `1.3.0`, see [conformance/README.md](conformance/README.md)). The `lint` job in CI verifies it with `tools/conformance/manifest.py verify` and SHA-256 checks.
 
-The `conformance` job in CI runs `go test -count=1 -v ./internal/conformance/...` with `CONFORMANCE_REPORT` set, and uploads `conformance-report.json` as an artifact. The runner covers both the Memory and DynamoDB storages; DynamoDB uses DynamoDB Local started in a container. Without `CONFORMANCE_REPORT`, the test is skipped.
+The `conformance` job in CI runs `go test -count=1 -v ./internal/conformance/...` with `CONFORMANCE_REPORT` set, and uploads `conformance-report.json` as an artifact. The runner covers the Memory, DynamoDB and SQLite storages; DynamoDB uses DynamoDB Local started in a container, and SQLite uses local files. A required SQLite case that is not executed fails the job. Without `CONFORMANCE_REPORT`, the test is skipped.
 
 ## License
 

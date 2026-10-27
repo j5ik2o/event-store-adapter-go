@@ -16,10 +16,11 @@ import (
 )
 
 const (
-	reasonNoBackend     = "保存先の境界が未接続のため、場面を実行していない（設計 7.2 の4番以降）"
-	reasonNotInjectable = "保存先が差し込めない障害を持つため、場面を検証できない（設計 5.4）"
-	reasonChangeFeed    = "Go の公開設定 API（eventstore.Option と dynamodb.Config）に変更フィードを求める項目がないため、change_feed = true を表現できない"
-	reasonMemoryTTL     = "TTL 方式を要求する場面は DynamoDB だけで、メモリでは対象外（設計 5.2 の1）"
+	reasonNoBackend             = "保存先の境界が未接続のため、場面を実行していない（設計 7.2 の4番以降）"
+	reasonNoConfigurationSeeder = "保存先の境界が seed.configuration を書き込めないため、場面を実行していない"
+	reasonNotInjectable         = "保存先が差し込めない障害を持つため、場面を検証できない（設計 5.4）"
+	reasonChangeFeed            = "Go の公開設定 API（eventstore.Option と dynamodb.Config）に変更フィードを求める項目がないため、change_feed = true を表現できない"
+	reasonMemoryTTL             = "TTL 方式を要求する場面は DynamoDB だけで、メモリでは対象外（設計 5.2 の1）"
 )
 
 // runScenario runs one scenario on one backend following design 5.2. The first decision wins:
@@ -38,7 +39,7 @@ func runScenario(ctx context.Context, c ScenarioCase, backend string, b Backend)
 		return set(StatusNotApplicable, reasonMemoryTTL)
 	case b == nil:
 		return set(StatusUnverified, reasonNoBackend)
-	case plan.Store.ChangeFeed:
+	case plan.Store.ChangeFeed && backend != "sqlite":
 		return set(StatusUnrepresentable, reasonChangeFeed)
 	}
 	for _, f := range plan.Faults {
@@ -110,6 +111,15 @@ func runScenario(ctx context.Context, c ScenarioCase, backend string, b Backend)
 	if len(plan.Seed) > 0 {
 		if err := b.Seed(ctx, plan.Seed); err != nil {
 			return fail(0, "seed に失敗した: "+err.Error(), nil, err.Error())
+		}
+	}
+	if plan.SeedConfiguration != nil {
+		seeder, ok := b.(ConfigurationSeeder)
+		if !ok {
+			return set(StatusUnverified, reasonNoConfigurationSeeder)
+		}
+		if err := seeder.SeedConfiguration(ctx, plan.SeedConfiguration); err != nil {
+			return fail(0, "seed.configuration に失敗した: "+err.Error(), nil, err.Error())
 		}
 	}
 	inj := Injection{Faults: faults, Hooks: hooks, Plan: plan}
@@ -262,6 +272,17 @@ func execStep(ctx context.Context, b Backend, inj Injection, stores map[string]S
 			stores[s.CreateName] = created
 		}
 		out.err = err
+	case "holdWriteLock", "releaseWriteLock":
+		holder, ok := b.(WriteLockHolder)
+		if !ok {
+			out.err = fmt.Errorf("backend %s cannot hold the write lock", b.Name())
+			return out
+		}
+		if s.Op == "holdWriteLock" {
+			out.err = holder.HoldWriteLock(ctx)
+		} else {
+			out.err = holder.ReleaseWriteLock(ctx)
+		}
 	case "mutateWrittenPayload", "mutateReadPayload":
 		mutator, ok := st.(PayloadMutator)
 		if !ok {

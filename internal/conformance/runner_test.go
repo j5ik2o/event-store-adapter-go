@@ -57,20 +57,27 @@ func runConformance(ctx context.Context, root, requiredPath, path string, start 
 		}
 	}
 	var results []conformance.CaseResult
-	backends := []conformance.BackendState{{Name: "memory"}, {Name: "dynamodb"}}
+	backends := []conformance.BackendState{{Name: "memory"}, {Name: "dynamodb"}, {Name: "sqlite"}}
 	if len(causes) == 0 {
 		environment, err := start(ctx)
 		record("setup", err)
 		if err == nil {
-			for i, backend := range []*publicBackend{{name: "memory"}, {name: "dynamodb", environment: environment}} {
-				actual := conformance.RunBackend(ctx, data, backend)
+			for i, run := range []struct {
+				name    string
+				backend conformance.Backend
+			}{
+				{"memory", &publicBackend{name: "memory"}},
+				{"dynamodb", &publicBackend{name: "dynamodb", environment: environment}},
+				{"sqlite", newSQLiteBackend()},
+			} {
+				actual := conformance.RunBackend(ctx, data, run.backend)
 				results = append(results, actual...)
 				backends[i].Connected = true
-				list := conformance.RequiredList{backend.name: required[backend.name]}
+				list := conformance.RequiredList{run.name: required[run.name]}
 				report := conformance.BuildReport(manifest, actual, excluded, conformance.GateResult{Lists: list}, nil)
 				report.Backends = []conformance.BackendState{backends[i]}
-				_, err := finishConformanceReport(filepath.Join(filepath.Dir(path), backend.name+"-conformance-report.json"), report, list)
-				record(backend.name+" report", err)
+				_, err := finishConformanceReport(filepath.Join(filepath.Dir(path), run.name+"-conformance-report.json"), report, list)
+				record(run.name+" report", err)
 			}
 		}
 	}
@@ -133,8 +140,9 @@ func TestConformanceSetupFailureReport(t *testing.T) {
 			require.True(t, report.Manifest.Verified)
 			require.Len(t, report.Required.Lists["memory"], 67)
 			require.Len(t, report.Required.Lists["dynamodb"], 106)
+			require.Len(t, report.Required.Lists["sqlite"], 68)
 			require.Empty(t, report.Cases)
-			require.Equal(t, []conformance.BackendState{{Name: "memory"}, {Name: "dynamodb"}}, report.Backends)
+			require.Equal(t, []conformance.BackendState{{Name: "memory"}, {Name: "dynamodb"}, {Name: "sqlite"}}, report.Backends)
 			require.NotEmpty(t, report.FailureReasons())
 			if writable {
 				raw, readErr := os.ReadFile(path)
@@ -189,7 +197,7 @@ func TestConformancePreparationFailureReport(t *testing.T) {
 			require.ErrorContains(t, err, stage+": ")
 			require.Zero(t, starts)
 			require.Empty(t, report.Cases)
-			require.Equal(t, []conformance.BackendState{{Name: "memory"}, {Name: "dynamodb"}}, report.Backends)
+			require.Equal(t, []conformance.BackendState{{Name: "memory"}, {Name: "dynamodb"}, {Name: "sqlite"}}, report.Backends)
 			raw, readErr := os.ReadFile(path)
 			require.NoError(t, readErr)
 			var saved conformance.Report
@@ -273,4 +281,33 @@ func TestPublicMemoryConformance(t *testing.T) {
 	// The public options cannot ask for a change feed, so that case is reported with a reason.
 	require.Equal(t, []string{"memory-change-feed-unsupported"}, unrepresentable)
 	require.Equal(t, len(conformance.ApplicableCases(data, "memory")), success+len(unrepresentable))
+}
+
+// TestPublicSQLiteConformance runs every applicable case against real SQLite files, with no skipped
+// or unrepresentable case: the unsupported change feed is a successful rejection, not an exclusion.
+func TestPublicSQLiteConformance(t *testing.T) {
+	data, err := conformance.LoadData(filepath.Join("..", "..", "conformance"))
+	require.NoError(t, err)
+	required, err := conformance.LoadRequired("required.json")
+	require.NoError(t, err)
+	results := conformance.RunBackend(context.Background(), data, newSQLiteBackend())
+	success := 0
+	for _, result := range results {
+		if result.Backend != "sqlite" {
+			continue
+		}
+		switch result.Status {
+		case conformance.StatusSuccess:
+			success++
+		case conformance.StatusNotApplicable:
+		default:
+			t.Errorf("%s: %s: %s", result.ID, result.Status, result.Reason)
+		}
+	}
+	applicable := conformance.ApplicableCases(data, "sqlite")
+	require.Len(t, applicable, 68)
+	require.Equal(t, len(applicable), success)
+	gate, err := conformance.EvaluateRequired(conformance.RequiredList{"sqlite": required["sqlite"]}, results)
+	require.NoError(t, err)
+	require.Empty(t, gate.Violations)
 }

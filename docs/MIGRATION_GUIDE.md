@@ -17,7 +17,7 @@ This library follows [common contract v5](https://github.com/j5ik2o/event-store-
 3. Implement `AggregateID` using `TypeName()` and `Value()`. Remove `AsString`, KeyResolver and shard configuration. Type names cannot contain `-`; the resulting ID has a 1024-byte UTF-8 limit.
 4. Use arbitrary event/state types and `Serializer[T]` (for example `NewJSONSerializer[T]()`). Remove Event/Aggregate interfaces and map converters. Put metadata in validated `NewEventEnvelope`/`NewSnapshotEnvelope` values; optional manifest is specified with `WithManifest`.
 5. Remove version arguments, version comparison and `IsCreated`. Assign consecutive event numbers starting at 1. A pair write requires the same event and snapshot number; the previous head is inferred from the event number.
-6. Use `memory.NewStore` then `memory.New`, or `dynamodb.New` with `Config` naming distinct journal/snapshot/head tables and the history index. Settings are supplied through `Option`. No history is the default or `NoRetention()`; positive `KeepLatest(n)` replaces keep-snapshot options. Zero is a configuration error, not a history count. Memory rejects TTL mode; DynamoDB accepts `RetentionTTL` and non-negative `WithTTLGraceSeconds`.
+6. Use `memory.NewStore` then `memory.New`, `sqlite.Initialize`, `sqlite.Open` then `sqlite.New`, or `dynamodb.New` with `Config` naming distinct journal/snapshot/head tables and the history index. Settings are supplied through `Option`. No history is the default or `NoRetention()`; positive `KeepLatest(n)` replaces keep-snapshot options. Zero is a configuration error, not a history count. Memory and SQLite reject TTL mode; DynamoDB accepts `RetentionTTL` and non-negative `WithTTLGraceSeconds`.
 7. Handle the five error kinds with `KindOf`/`errors.As`, and preserve causes through `Unwrap`. Retention failure logs/notifications do not undo a successful write.
 
 Restoration begins at the snapshot's next event, or at 1 without a snapshot. An absent head returns nil. Do not use `HeadSeqNr` as the starting position; it can differ from the snapshot number, especially during concurrent DynamoDB reads.
@@ -53,6 +53,14 @@ Go migration support consists of these instructions. There is no migration tool,
 4. For each aggregate, create validated envelopes and write events through the new API in preserved order with consecutive numbers **1, 2, 3, …**. Build any snapshot from the state reached at that number and use a pair write with the same number. An old snapshot alone does not replace the event history needed for this rewrite.
 
 The old two-table sharded keys and snapshot version attributes cannot be reused in place. Time conversion and metadata/payload separation belong to the application's migration code.
+
+### SQLite
+
+The Go library before v5 had no SQLite storage, so there is no old SQLite data to migrate and this repository provides no SQLite migration tool. To adopt SQLite, start from a new file:
+
+1. Choose a path on a local file system and call `sqlite.Initialize` once with the retention option you will use later.
+2. Call `sqlite.Open` with the same option, then `sqlite.New` with your serializers. Do not call `Initialize` again on the same file; it fails with a configuration error.
+3. To move data from another storage, read the events there and write them through the new API with consecutive numbers starting at 1, as in the steps above. See [SQLITE_DATABASE_SCHEMA](SQLITE_DATABASE_SCHEMA.md) for the file layout. A file written by the Rust v5 implementation can be opened directly.
 
 ## Verification and cutover
 

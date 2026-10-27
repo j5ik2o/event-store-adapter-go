@@ -11,7 +11,7 @@
 
 ## 概要
 
-このライブラリは、CQRS/Event Sourcing 用の同期イベントストアを Memory と DynamoDB で提供します。
+このライブラリは、CQRS/Event Sourcing 用の同期イベントストアを Memory、DynamoDB、SQLite で提供します。
 
 [English](./README.md)
 
@@ -164,6 +164,32 @@ func openDynamoDB(ctx context.Context, client *awsdb.Client) (eventstore.EventSt
 
 factory は3表の設定項目を照合し、すべて存在しない場合に transaction で作ります。表自体は作りません。head と current snapshot の BatchGetItem、journal の Query は強整合で読み、全頁を取得します。head と current snapshot の読取は原子的ではなく、並行書込により異なる番号が返る場合があります。
 
+### SQLite
+
+SQLite の保存先は、イベントとスナップショットを 1 つのローカルのデータベースファイルに保存します。配置は Rust v5 の実装と同じ 5 つの表です。詳しくは [SQLITE_DATABASE_SCHEMA.ja.md](docs/SQLITE_DATABASE_SCHEMA.ja.md) を参照してください。新しいファイルは `sqlite.Initialize` で一度だけ初期化し、`sqlite.Open` で開き、`sqlite.New` で serializer をつなぎます。`Open` はファイルを作らず、初期化もしません。上の domain 型を使うと次のとおりです。
+
+```go
+import (
+    "context"
+    eventstore "github.com/j5ik2o/event-store-adapter-go/v5"
+    "github.com/j5ik2o/event-store-adapter-go/v5/sqlite"
+)
+
+func openSQLite(ctx context.Context, path string) (*sqlite.Store, eventstore.EventStore[orderEvent, orderState], error) {
+    keep, err := eventstore.KeepLatest(2)
+    if err != nil { return nil, nil, err }
+    opts := []eventstore.Option{eventstore.WithRetentionCount(keep)}
+    if err := sqlite.Initialize(ctx, path, sqlite.Config{}, opts...); err != nil { return nil, nil, err }
+    store, err := sqlite.Open(ctx, path, sqlite.Config{}, opts...)
+    if err != nil { return nil, nil, err }
+    es, err := sqlite.New(store, eventstore.NewJSONSerializer[orderEvent](), eventstore.NewJSONSerializer[orderState]())
+    if err != nil { _ = store.Close(); return nil, nil, err }
+    return store, es, nil
+}
+```
+
+使い終わったら `Store.Close` を呼びます。ローカルのファイルシステムを使ってください。TTL 方式の保持と変更フィードは設定エラーです。追記は、ヘッドを照合する前に書き込みのロックを取ります。別の接続が `Config.LockWait`（既定は 5 秒）より長くロックを持つと、追記は保存先エラーで失敗します。
+
 ## 直列化
 
 `Serializer[T]` は payload または集約状態だけを直列化し、封筒の metadata は渡されません。domain 型にライブラリ固有の interface は不要です。`Serialize(value T) ([]byte, error)` と `Deserialize(data []byte) (T, error)` を実装します。
@@ -174,7 +200,7 @@ serializer が返したエラーは `SerializationError`（`KindSerialization`�
 
 ## 保持
 
-保持件数を省略するか `WithRetentionCount(NoRetention())` を渡すと、current snapshot だけを保存して履歴を作りません。`KeepLatest(n)` は `n >= 1` を要求し、current snapshot は件数に含めません。Memory は削除方式、DynamoDB は `RetentionDelete`（既定）と `RetentionTTL` に対応します。`WithTTLGraceSeconds` は0以上の猶予秒を指定します。
+保持件数を省略するか `WithRetentionCount(NoRetention())` を渡すと、current snapshot だけを保存して履歴を作りません。`KeepLatest(n)` は `n >= 1` を要求し、current snapshot は件数に含めません。Memory と SQLite は削除方式だけ、DynamoDB は `RetentionDelete`（既定）と `RetentionTTL` に対応します。`WithTTLGraceSeconds` は0以上の猶予秒を指定します。
 
 保持処理は snapshot と履歴の確定後に同期で行います。失敗はログに記録され、`WithRetentionFailureHandler(func(context.Context, error))` でも通知できます。確定済み書込は成功のまま返ります。
 
@@ -190,7 +216,7 @@ serializer が返したエラーは `SerializationError`（`KindSerialization`�
 
 `conformance/` に共通の適合テストデータ（版 `1.3.0`、[conformance/README.md](conformance/README.md) を参照）を置いています。CI の `lint` ジョブが `tools/conformance/manifest.py verify` と SHA-256 で照合します。
 
-CI の `conformance` ジョブは、`CONFORMANCE_REPORT` を設定して `go test -count=1 -v ./internal/conformance/...` を実行し、`conformance-report.json` を成果物として上げます。実行器は Memory と DynamoDB の両方の保存先を対象とし、DynamoDB はコンテナで起動した DynamoDB Local を使います。`CONFORMANCE_REPORT` がなければ、この試験は飛ばされます。
+CI の `conformance` ジョブは、`CONFORMANCE_REPORT` を設定して `go test -count=1 -v ./internal/conformance/...` を実行し、`conformance-report.json` を成果物として上げます。実行器は Memory、DynamoDB、SQLite の保存先を対象とし、DynamoDB はコンテナで起動した DynamoDB Local、SQLite はローカルのファイルを使います。実行されなかった SQLite の必須ケースがあると、ジョブは失敗します。`CONFORMANCE_REPORT` がなければ、この試験は飛ばされます。
 
 ## ライセンス
 
