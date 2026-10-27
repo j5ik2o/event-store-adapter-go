@@ -252,7 +252,7 @@ func loadExclusions(d *Data, rel string, obj map[string]any) error {
 }
 
 // providedBackends are the storages this language provides.
-var providedBackends = []string{"memory", "dynamodb"}
+var providedBackends = []string{"memory", "dynamodb", "sqlite"}
 
 // unprovidedValueOperations are the value operations of storages this language does not provide.
 var unprovidedValueOperations = map[string]string{
@@ -339,6 +339,9 @@ func loadCases(d *Data, rel, format string, obj map[string]any, ids map[string]s
 			}
 			plan, err := parseScenario(mat)
 			if err != nil {
+				return fmt.Errorf("%s: case %q: %w", rel, id, err)
+			}
+			if err := checkSQLiteOnlyUse(plan, backends, rules); err != nil {
 				return fmt.Errorf("%s: case %q: %w", rel, id, err)
 			}
 			d.Scenarios = append(d.Scenarios, ScenarioCase{

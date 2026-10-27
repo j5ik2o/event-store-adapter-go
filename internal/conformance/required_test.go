@@ -15,14 +15,20 @@ func TestLoadRequired(t *testing.T) {
 		require.NoError(t, err)
 		d, err := LoadData(dataRoot())
 		require.NoError(t, err)
-		assert.Len(t, req, 2)
+		assert.Len(t, req, 3)
 		assert.Len(t, req["memory"], 67)
 		assert.Len(t, req["dynamodb"], 106)
+		assert.Len(t, req["sqlite"], 68)
 		require.NoError(t, CheckRequiredCoverage(d, req))
-		deleteOne := RequiredList{"memory": req["memory"][1:], "dynamodb": req["dynamodb"]}
+		deleteOne := RequiredList{"memory": req["memory"][1:], "dynamodb": req["dynamodb"], "sqlite": req["sqlite"]}
 		require.Error(t, CheckRequiredCoverage(d, deleteOne))
-		addExcluded := RequiredList{"memory": append(append([]string{}, req["memory"]...), "fnv-empty"), "dynamodb": req["dynamodb"]}
+		addExcluded := RequiredList{"memory": append(append([]string{}, req["memory"]...), "fnv-empty"), "dynamodb": req["dynamodb"], "sqlite": req["sqlite"]}
 		require.Error(t, CheckRequiredCoverage(d, addExcluded))
+		deleteSqlite := RequiredList{"memory": req["memory"], "dynamodb": req["dynamodb"], "sqlite": req["sqlite"][1:]}
+		require.Error(t, CheckRequiredCoverage(d, deleteSqlite), "a missing SQLite case must stop the gate")
+		for _, id := range []string{"sqlite-ttl-unsupported", "sqlite-change-feed-unsupported", "sqlite-write-lock-busy", "store-shared-persistent"} {
+			assert.Contains(t, req["sqlite"], id)
+		}
 	})
 
 	write := func(t *testing.T, body string) string {
@@ -31,15 +37,19 @@ func TestLoadRequired(t *testing.T) {
 		return p
 	}
 
-	t.Run("key set must be exactly memory and dynamodb", func(t *testing.T) {
+	t.Run("key set must be exactly memory, dynamodb and sqlite", func(t *testing.T) {
 		_, err := LoadRequired(write(t, `{"memory": []}`))
 		assert.Error(t, err)
-		_, err = LoadRequired(write(t, `{"memory": [], "dynamodb": [], "other": []}`))
+		_, err = LoadRequired(write(t, `{"memory": [], "dynamodb": []}`))
+		assert.Error(t, err, "sqlite is required")
+		_, err = LoadRequired(write(t, `{"memory": [], "dynamodb": [], "sqlite": [], "other": []}`))
 		assert.Error(t, err)
+		_, err = LoadRequired(write(t, `{"memory": [], "dynamodb": [], "sqlite": []}`))
+		assert.NoError(t, err)
 	})
 
 	t.Run("duplicate id is rejected", func(t *testing.T) {
-		_, err := LoadRequired(write(t, `{"memory": ["a","a"], "dynamodb": []}`))
+		_, err := LoadRequired(write(t, `{"memory": ["a","a"], "dynamodb": [], "sqlite": []}`))
 		assert.Error(t, err)
 	})
 
@@ -52,7 +62,7 @@ func TestLoadRequired(t *testing.T) {
 func TestRequiredCoreValues(t *testing.T) {
 	d, err := LoadData(dataRoot())
 	require.NoError(t, err)
-	req := RequiredList{"memory": {}, "dynamodb": {}}
+	req := RequiredList{"memory": {}, "dynamodb": {}, "sqlite": {}}
 	for _, c := range d.Values {
 		if c.Operation == "buildAid" || c.Operation == "validateSeqNr" {
 			for _, name := range requiredBackends {
@@ -79,9 +89,10 @@ func TestRequiredCoreValues(t *testing.T) {
 				changed[i].Status = status
 				gate, err := EvaluateRequired(req, changed)
 				require.NoError(t, err)
-				require.Len(t, gate.Violations, 2)
-				assert.Contains(t, gate.Violations[0], r.ID)
-				assert.Contains(t, gate.Violations[1], r.ID)
+				require.Len(t, gate.Violations, 3)
+				for _, violation := range gate.Violations {
+					assert.Contains(t, violation, r.ID)
+				}
 			})
 		}
 	}
@@ -146,6 +157,26 @@ func TestEvaluateRequired(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, g.Violations, 1)
 		assert.Contains(t, g.Violations[0], "dynamodb")
+	})
+	t.Run("a required sqlite case that did not succeed is a violation naming sqlite", func(t *testing.T) {
+		sqliteResults := []CaseResult{
+			{ID: "sq-ok", Status: Status("success"), Reason: "r", Backend: "sqlite"},
+			{ID: "sq-skipped", Status: Status("unverified"), Reason: "r", Backend: "sqlite"},
+			{ID: "sq-failed", Status: Status("failure"), Reason: "r", Backend: "sqlite"},
+		}
+		g, err := EvaluateRequired(RequiredList{"memory": {}, "dynamodb": {}, "sqlite": {"sq-ok"}}, sqliteResults)
+		require.NoError(t, err)
+		assert.Empty(t, g.Violations)
+
+		g, err = EvaluateRequired(RequiredList{"memory": {}, "dynamodb": {}, "sqlite": {"sq-ok", "sq-skipped", "sq-failed"}}, sqliteResults)
+		require.NoError(t, err)
+		require.Len(t, g.Violations, 2)
+		for _, violation := range g.Violations {
+			assert.Contains(t, violation, "sqlite")
+		}
+
+		_, err = EvaluateRequired(RequiredList{"memory": {}, "dynamodb": {}, "sqlite": {"sq-not-run"}}, sqliteResults)
+		assert.Error(t, err, "a required case that was never executed must stop the gate")
 	})
 }
 

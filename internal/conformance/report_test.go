@@ -27,7 +27,7 @@ func reportResults() []CaseResult {
 func TestReport(t *testing.T) {
 	results := reportResults()
 	m := ManifestResult{Version: "1.3.0", Verified: true, FileCount: 22}
-	gate := GateResult{Lists: RequiredList{"memory": {}, "dynamodb": {}}}
+	gate := GateResult{Lists: RequiredList{"memory": {}, "dynamodb": {}, "sqlite": {}}}
 	rep := BuildReport(m, results, nil, gate, nil)
 
 	path := filepath.Join(t.TempDir(), "conformance-report.json")

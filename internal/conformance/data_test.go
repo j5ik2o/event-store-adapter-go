@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -245,14 +246,14 @@ func decodeObject(t *testing.T, body string) map[string]any {
 }
 
 func TestLoadCases_OutOfScope(t *testing.T) {
-	t.Run("a scenario that targets only SQLite is read without its steps being interpreted", func(t *testing.T) {
+	t.Run("a scenario that targets only Spanner is read without its steps being interpreted", func(t *testing.T) {
 		d := &Data{}
-		err := loadCases(d, "x.json", "scenarios", decodeObject(t, fmt.Sprintf(outOfScopeScenario, "sqlite", `"seed":{"events":{},"snapshots":{}},`)), map[string]string{})
+		err := loadCases(d, "x.json", "scenarios", decodeObject(t, fmt.Sprintf(outOfScopeScenario, "spanner", `"seed":{"events":{},"snapshots":{}},`)), map[string]string{})
 		require.NoError(t, err)
 		require.Len(t, d.Scenarios, 1)
 		assert.True(t, d.Scenarios[0].OutOfScope)
 		assert.Nil(t, d.Scenarios[0].Plan)
-		assert.Equal(t, []string{"sqlite"}, d.Scenarios[0].Backends)
+		assert.Equal(t, []string{"spanner"}, d.Scenarios[0].Backends)
 	})
 
 	t.Run("a scenario that targets memory keeps rejecting an unknown operation", func(t *testing.T) {
@@ -294,21 +295,36 @@ func TestLoadData_OutOfScopeFiles(t *testing.T) {
 	d, err := LoadData(dataRoot())
 	require.NoError(t, err)
 
-	t.Run("the SQLite lock scenario that uses holdWriteLock is read as out of scope", func(t *testing.T) {
+	t.Run("the SQLite lock scenario that uses holdWriteLock is read as a scenario in scope", func(t *testing.T) {
 		var found int
 		for _, c := range d.Scenarios {
 			if c.File == "sqlite/write-lock.json" {
 				found++
-				assert.True(t, c.OutOfScope, c.ID)
-				assert.Nil(t, c.Plan, c.ID)
+				assert.False(t, c.OutOfScope, c.ID)
+				require.NotNil(t, c.Plan, c.ID)
+				require.NotNil(t, c.Plan.Store.LockWaitMilliseconds, c.ID)
 			}
 		}
 		assert.Positive(t, found)
 	})
 
-	t.Run("only the scenarios without memory and dynamodb are out of scope", func(t *testing.T) {
+	t.Run("the SQLite configuration scenarios keep their seeded configuration in the plan", func(t *testing.T) {
+		var seeded int
 		for _, c := range d.Scenarios {
-			provided := contains(c.Backends, "memory") || contains(c.Backends, "dynamodb")
+			if c.File == "sqlite/configuration.json" {
+				assert.False(t, c.OutOfScope, c.ID)
+				require.NotNil(t, c.Plan, c.ID)
+				if c.Plan.SeedConfiguration != nil {
+					seeded++
+				}
+			}
+		}
+		assert.Equal(t, 4, seeded)
+	})
+
+	t.Run("only the scenarios without memory, dynamodb and sqlite are out of scope", func(t *testing.T) {
+		for _, c := range d.Scenarios {
+			provided := contains(c.Backends, "memory") || contains(c.Backends, "dynamodb") || contains(c.Backends, "sqlite")
 			assert.Equal(t, !provided, c.OutOfScope, c.ID)
 			assert.Equal(t, provided, c.Plan != nil, c.ID)
 		}
@@ -362,13 +378,31 @@ func TestLoadCases_StoreSettings(t *testing.T) {
 		key, value := key, value
 		store := `{"retention_count":null,"retention_mode":"delete","` + key + `":` + value + `}`
 
-		t.Run("a scenario that targets only SQLite is read with the setting "+key, func(t *testing.T) {
-			d, err := load(t, `["sqlite"]`, store)
+		t.Run("a scenario that targets only Spanner is read with the setting "+key, func(t *testing.T) {
+			d, err := load(t, `["spanner"]`, store)
 			require.NoError(t, err)
 			require.Len(t, d.Scenarios, 1)
 			assert.True(t, d.Scenarios[0].OutOfScope)
 			assert.Nil(t, d.Scenarios[0].Plan)
 		})
+
+		if key == "lock_wait_milliseconds" {
+			t.Run("a scenario that targets only SQLite interprets the setting "+key, func(t *testing.T) {
+				d, err := load(t, `["sqlite"]`, store)
+				require.NoError(t, err)
+				require.Len(t, d.Scenarios, 1)
+				require.NotNil(t, d.Scenarios[0].Plan)
+				require.NotNil(t, d.Scenarios[0].Plan.Store.LockWaitMilliseconds)
+				assert.Equal(t, int64(50), *d.Scenarios[0].Plan.Store.LockWaitMilliseconds)
+			})
+		} else {
+			t.Run("a scenario that targets only SQLite rejects the setting "+key, func(t *testing.T) {
+				d, err := load(t, `["sqlite"]`, store)
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), key)
+				assert.Empty(t, d.Scenarios)
+			})
+		}
 
 		for _, backends := range []string{`["memory"]`, `["dynamodb"]`, `["memory","dynamodb","sqlite"]`} {
 			backends := backends
@@ -389,4 +423,90 @@ func TestLoadCases_StoreSettings(t *testing.T) {
 		require.NotNil(t, d.Scenarios[0].Plan.Store.RetentionCount)
 		assert.Equal(t, int64(1), *d.Scenarios[0].Plan.Store.RetentionCount)
 	})
+}
+
+// sqliteMisuseCase builds a scenario that targets the given backends. The lock steps are the accepted form of
+// conformance/README.md; each rejection test below changes exactly one thing in it.
+func sqliteMisuseCase(backends, rules, store, seed string, steps ...string) string {
+	return fmt.Sprintf(`{"cases":[{
+  "id":"w-1","rules":%s,"description":"d","backends":%s,
+  "store":%s,
+  %s
+  "fixtures":{"events":{
+    "e1":{"aggregate_id":{"type_name":"Order","value":"9"},"seq_nr":1,"occurred_at":"2026-10-05T00:00:00.123456789Z","payload":{"number":1},"manifest":""},
+    "e2":{"aggregate_id":{"type_name":"Order","value":"9"},"seq_nr":2,"occurred_at":"2026-10-05T00:00:00.123456789Z","payload":{"number":2},"manifest":""}},
+    "snapshots":{}},
+  "steps":[%s]
+}]}`, rules, backends, store, seed, strings.Join(steps, ","))
+}
+
+const (
+	lockStore    = `{"retention_count":null,"retention_mode":"delete","lock_wait_milliseconds":100}`
+	plainStore   = `{"retention_count":null,"retention_mode":"delete"}`
+	stepPersist1 = `{"op":"persistEvent","arguments":{"event":"e1"},"expect":{"result":"success"}}`
+	stepHold     = `{"op":"holdWriteLock","arguments":{},"expect":{"result":"success"}}`
+	stepFail     = `{"op":"persistEvent","arguments":{"event":"e2"},"expect":{"error":{"category":"storage"}}}`
+	stepFailLock = `{"op":"persistEvent","arguments":{"event":"e2"},"expect":{"error":{"category":"optimistic-lock"}}}`
+	stepRelease  = `{"op":"releaseWriteLock","arguments":{},"expect":{"result":"success"}}`
+	stepPersist2 = `{"op":"persistEvent","arguments":{"event":"e2"},"expect":{"result":"success"}}`
+	seedConfig   = `"seed":{"configuration":{"store_id":"5f0c8b8e-3c1a-4d7e-9a4b-2f6d1c0e7a11","layout_version":1,"keep_snapshot_count":null,"retention_mode":"delete","change_feed_enabled":0}},`
+)
+
+func TestLoadCases_SQLiteOnlyMisuse(t *testing.T) {
+	load := func(body string) (*Data, error) {
+		d := &Data{}
+		err := loadCases(d, "x.json", "scenarios", decodeObject(t, body), map[string]string{})
+		return d, err
+	}
+	lockSteps := []string{stepPersist1, stepHold, stepFail, stepRelease, stepPersist2}
+
+	t.Run("accepted forms", func(t *testing.T) {
+		d, err := load(sqliteMisuseCase(`["sqlite"]`, `["SQ-7","E-1"]`, lockStore, "", lockSteps...))
+		require.NoError(t, err)
+		require.Len(t, d.Scenarios, 1)
+		assert.NotNil(t, d.Scenarios[0].Plan)
+
+		d, err = load(sqliteMisuseCase(`["sqlite"]`, `["SQ-2"]`, plainStore, seedConfig, stepPersist1))
+		require.NoError(t, err)
+		require.Len(t, d.Scenarios, 1)
+		assert.NotNil(t, d.Scenarios[0].Plan.SeedConfiguration)
+	})
+
+	for _, tc := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{"seed.configuration outside a scenario that targets only sqlite",
+			sqliteMisuseCase(`["memory","sqlite"]`, `["SQ-2"]`, plainStore, seedConfig, stepPersist1),
+			"seed.configuration is only for"},
+		{"seed with both items and configuration",
+			sqliteMisuseCase(`["sqlite"]`, `["SQ-2"]`, plainStore, strings.Replace(seedConfig, `"seed":{`, `"seed":{"items":[],`, 1), stepPersist1),
+			"exactly one of items and configuration"},
+		{"holdWriteLock while the lock is held",
+			sqliteMisuseCase(`["sqlite"]`, `["SQ-7"]`, lockStore, "", stepPersist1, stepHold, stepHold, stepFail, stepRelease, stepPersist2),
+			"already held"},
+		{"releaseWriteLock without a held lock",
+			sqliteMisuseCase(`["sqlite"]`, `["SQ-7"]`, lockStore, "", stepPersist1, stepFail, stepRelease, stepPersist2),
+			"without a held lock"},
+		{"lock scenario without the rule SQ-7",
+			sqliteMisuseCase(`["sqlite"]`, `["E-1"]`, lockStore, "", lockSteps...),
+			"needs the rule SQ-7"},
+		{"lock scenario without lock_wait_milliseconds",
+			sqliteMisuseCase(`["sqlite"]`, `["SQ-7"]`, plainStore, "", lockSteps...),
+			"needs store.lock_wait_milliseconds"},
+		{"the scenario ends while the lock is held",
+			sqliteMisuseCase(`["sqlite"]`, `["SQ-7"]`, lockStore, "", stepPersist1, stepHold, stepFail),
+			"ends while the write lock is held"},
+		{"no persist expects a storage error while the lock is held",
+			sqliteMisuseCase(`["sqlite"]`, `["SQ-7"]`, lockStore, "", stepPersist1, stepHold, stepFailLock, stepRelease, stepPersist2),
+			"no persist expects a storage error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, err := load(tc.body)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+			assert.Empty(t, d.Scenarios)
+		})
+	}
 }

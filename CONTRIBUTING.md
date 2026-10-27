@@ -23,7 +23,7 @@ Some files in this repository are copies of shared data, and CI checks them agai
 
 - Go: `go.mod` declares `go 1.25.0` and `toolchain go1.27.3`. CI uses Go 1.27 (`actions/setup-go`).
 - Python 3: CI uses Python 3.15 to run the scripts under `tools/` and the tests under `.github/`. `tools/user-docs/check.py` requires Python 3.10 or later.
-- Docker: `make test` runs `./...`, which includes the tests in `internal/dynamodbtest`. They start DynamoDB Local in a container with testcontainers-go. The conformance runner for DynamoDB also uses a DynamoDB Local container.
+- Docker: `make test` runs `./...`, which includes the tests in `internal/dynamodbtest`. They start DynamoDB Local in a container with testcontainers-go. The conformance runner for DynamoDB also uses a DynamoDB Local container. The SQLite tests (`sqlite/` and the SQLite part of the conformance runner) need no container: they use SQLite files in temporary directories and the pure Go driver `modernc.org/sqlite`, so no cgo or emulator is required.
 - Download the dependencies with `make prepare` (`go mod download`).
 - Install the tools with `make install-tools` (staticcheck and goimports, both `@latest`) or with `bash setup.sh` (staticcheck `@latest`). CI pins staticcheck to `v0.8.2`.
 
@@ -36,7 +36,7 @@ CI (`.github/workflows/ci.yml`) runs the following. Run the same commands locall
 | `lint` | `python3 tools/conformance/manifest.py verify`, the SHA-256 checks of the shared files listed above, `python3 tools/user-docs/check.py`, `make vet` (`go vet ./...`), `go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...` |
 | `test` | `make test` (`go test -race -v ./...`) |
 | `release-checks` | `python3 -m unittest discover -s .github -p 'test_*.py' -v`, `go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7` and `actionlint` |
-| `conformance` | `go test -count=1 -v ./internal/conformance/...` with the environment variable `CONFORMANCE_REPORT` set to the path of the report file (the test is skipped when it is not set) |
+| `conformance` | `go test -count=1 -v ./internal/conformance/...` with the environment variable `CONFORMANCE_REPORT` set to the path of the report file (the test is skipped when it is not set). It runs the Memory, DynamoDB and SQLite storages; `internal/conformance/required.json` lists the cases each storage must pass, and a listed case that is not executed fails the job |
 
 Other commands from the `Makefile`:
 

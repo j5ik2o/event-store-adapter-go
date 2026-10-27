@@ -19,7 +19,7 @@
 3. `TypeName()`・`Value()` で `AggregateID` を実装します。`AsString`・KeyResolver・シャード設定を外します。型名に `-` を含めず、組み立てた ID を UTF-8 で1024バイト以下にします。
 4. イベントと状態には任意の domain 型、直列化には `Serializer[T]`（例: `NewJSONSerializer[T]()`）を使います。旧 Event/Aggregate interface と map converter を外し、metadata を検査済みの `NewEventEnvelope`・`NewSnapshotEnvelope` に分けます。任意の manifest は `WithManifest` で指定します。
 5. version 引数・version 照合・`IsCreated` を外し、イベントに1から始まる連番を付けます。pair 書込ではイベントと snapshot の番号を一致させます。直前の head はイベント番号から求められます。
-6. `memory.NewStore` と `memory.New`、または3表と履歴 index を `Config` で指定する `dynamodb.New` を使います。設定は `Option` で渡します。既定と `NoRetention()` は履歴なし、保持には正の `KeepLatest(n)` を使います。0は設定エラーです。Memory は TTL 方式を受け付けません。DynamoDB は `RetentionTTL` と0以上の `WithTTLGraceSeconds` に対応します。
+6. `memory.NewStore` と `memory.New`、`sqlite.Initialize` と `sqlite.Open` と `sqlite.New`、または3表と履歴 index を `Config` で指定する `dynamodb.New` を使います。設定は `Option` で渡します。既定と `NoRetention()` は履歴なし、保持には正の `KeepLatest(n)` を使います。0は設定エラーです。Memory と SQLite は TTL 方式を受け付けません。DynamoDB は `RetentionTTL` と0以上の `WithTTLGraceSeconds` に対応します。
 7. `KindOf`・`errors.As` で5分類を判別し、`Unwrap` で原因を扱います。保持失敗のログ・通知は、確定済み書込を失敗に変えません。
 
 復元は snapshot の次番号、snapshot がなければ1から行います。head がなければ nil が返ります。`HeadSeqNr` を開始位置に使いません。特に DynamoDB の並行読取では、head と snapshot の番号が異なる場合があります。
@@ -55,6 +55,14 @@ Go の移行支援はこの手順書です。移行ツール・旧配置 reader�
 4. 集約ごとに検査済み封筒を作り、元の順序を保って **1, 2, 3, … の連続番号**で新 API に書き直します。snapshot はその番号までの状態から作り、同じ番号の pair 書込で保存します。旧 snapshot だけでは、この書直しに必要なイベント履歴の代わりになりません。
 
 旧2表のシャード付きキーと snapshot の version 属性をそのまま再利用できません。時刻の変換と metadata/payload の分離は利用者の移行コードが担当します。
+
+### SQLite
+
+v5 より前の Go のライブラリには SQLite の保存先がなかったので、移行する SQLite の旧データはなく、このリポジトリは SQLite の移行ツールを提供しません。SQLite を使い始めるときは、新しいファイルから始めます。
+
+1. ローカルのファイルシステムにパスを決め、あとで使う保持のオプションを付けて `sqlite.Initialize` を一度だけ呼びます。
+2. 同じオプションで `sqlite.Open` を呼び、続けて serializer を渡して `sqlite.New` を呼びます。同じファイルでもう一度 `Initialize` を呼ぶと、設定エラーで失敗します。
+3. 別の保存先からデータを移すときは、そこでイベントを読み、上の手順と同じように、1 から始まる連続番号で新しい API に書き直します。ファイルの配置は [SQLITE_DATABASE_SCHEMA](SQLITE_DATABASE_SCHEMA.ja.md) を参照してください。Rust v5 の実装が書いたファイルは、そのまま開けます。
 
 ## 確認と切り替え
 

@@ -687,6 +687,15 @@ func TestRunScenario_ChangeFeed(t *testing.T) {
 		assert.Empty(t, b.calls)
 	})
 
+	t.Run("sqlite runs a change feed request and opens the store so the backend can reject it", func(t *testing.T) {
+		b := &fakeBackend{name: "sqlite", injectable: true}
+		c := mkCase(t, withStore(`{"retention_count":null,"retention_mode":"delete","change_feed":true}`))
+		assert.True(t, c.Plan.Store.ChangeFeed)
+		r := runScenario(ctx, c, "sqlite", b)
+		assert.NotEqual(t, StatusUnrepresentable, r.Status, r.Reason)
+		assert.Equal(t, int32(1), b.opens, "a change feed request must reach the sqlite backend instead of being skipped")
+	})
+
 	t.Run("a missing change_feed means false and the scenario runs", func(t *testing.T) {
 		b := &fakeBackend{name: "memory", injectable: true}
 		c := mkCase(t, scenarioBody("", "", persistOK))
@@ -717,7 +726,7 @@ func TestRunScenario_ChangeFeed(t *testing.T) {
 }
 
 func outOfScopeFile(file string) bool {
-	for _, dir := range []string{"sqlite/", "spanner/", "bigtable/", "scenarios/stores/", "values/bigtable-envelope.json"} {
+	for _, dir := range []string{"spanner/", "bigtable/", "values/bigtable-envelope.json"} {
 		if strings.HasPrefix(file, dir) {
 			return true
 		}
@@ -765,7 +774,7 @@ func TestRunBackend_OutOfScope(t *testing.T) {
 			rep := BuildReport(ManifestResult{Verified: true}, results, nil, GateResult{}, nil)
 			var checked int
 			for rule, counts := range rep.Rules {
-				if !strings.HasPrefix(rule, "SQ-") && !strings.HasPrefix(rule, "SPN-") && !strings.HasPrefix(rule, "BT-") {
+				if !strings.HasPrefix(rule, "SPN-") && !strings.HasPrefix(rule, "BT-") {
 					continue
 				}
 				checked++
