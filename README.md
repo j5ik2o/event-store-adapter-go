@@ -226,7 +226,7 @@ An error returned by a serializer is classified as `SerializationError` (`KindSe
 
 ## Retention
 
-Omitting the retention count, or supplying `WithRetentionCount(NoRetention())`, keeps the current snapshot without history. `KeepLatest(n)` requires `n >= 1`; current snapshots do not count toward `n`. Memory and SQLite support delete retention only. DynamoDB supports `RetentionDelete` (default) and `RetentionTTL`, with `WithTTLGraceSeconds` specifying a non-negative grace period in seconds. Spanner supports `RetentionDelete` (default) and `RetentionTTL`; its TTL grace period is `Config.TTLGraceDays` in days, and `WithTTLGraceSeconds` is a configuration error there.
+Omitting the retention count, or supplying `WithRetentionCount(NoRetention())`, keeps the current snapshot without history. `KeepLatest(n)` requires `n >= 1`; current snapshots do not count toward `n`. Memory and SQLite support delete retention only. DynamoDB supports `RetentionDelete` (default) and `RetentionTTL`, with `WithTTLGraceSeconds` specifying a non-negative grace period in seconds. Spanner supports `RetentionDelete` (default) and `RetentionTTL`; its TTL grace period is `Config.TTLGraceDays` in days, and a non-zero `WithTTLGraceSeconds` is a configuration error there.
 
 Retention runs synchronously after a successful snapshot/history write. Failure is logged and can also be observed through `WithRetentionFailureHandler(func(context.Context, error))`; the committed write still returns success.
 

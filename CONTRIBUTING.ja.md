@@ -21,7 +21,7 @@
 
 ## ローカルの準備
 
-- Go: `go.mod` は `go 1.25.0` と `toolchain go1.27.3` を宣言しています。CI は Go 1.27 を使います（`actions/setup-go`）。
+- Go: `go.mod` は `go 1.26.0` と `toolchain go1.27.3` を宣言しています。CI は Go 1.27 を使います（`actions/setup-go`）。
 - Python 3: CI は Python 3.15 で、`tools/` 以下のスクリプトと `.github/` 以下の試験を実行します。 `tools/user-docs/check.py` は Python 3.10 以上が必要です。
 - Docker: `make test` は `./...` を実行し、`internal/dynamodbtest` の試験を含みます。この試験は testcontainers-go で DynamoDB Local のコンテナを起動します。DynamoDB の適合の実行器も DynamoDB Local のコンテナを使います。SQLite の試験（`sqlite/` と適合の実行器の SQLite の部分）にコンテナは要りません。一時ディレクトリの SQLite ファイルと、cgo を使わない Go のドライバー `modernc.org/sqlite` を使うので、cgo もエミュレーターも不要です。Spanner の試験（`spanner/`、`internal/spannertest`、適合の実行器の Spanner の部分）は、testcontainers-go で Cloud Spanner エミュレーターのコンテナを起動します。イメージは `internal/spannertest/environment.go` で digest により固定しています。エミュレーターが起動しなくても試験は飛ばされず、失敗します。
 - 依存は `make prepare`（`go mod download`）で取得します。

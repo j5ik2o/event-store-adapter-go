@@ -230,7 +230,7 @@ serializer が返したエラーは `SerializationError`（`KindSerialization`�
 
 ## 保持
 
-保持件数を省略するか `WithRetentionCount(NoRetention())` を渡すと、current snapshot だけを保存して履歴を作りません。`KeepLatest(n)` は `n >= 1` を要求し、current snapshot は件数に含めません。Memory と SQLite は削除方式だけ、DynamoDB は `RetentionDelete`（既定）と `RetentionTTL` に対応します。`WithTTLGraceSeconds` は0以上の猶予秒を指定します。Spanner も `RetentionDelete`（既定）と `RetentionTTL` に対応し、期限切れ方式の猶予は `Config.TTLGraceDays`（日数）で指定します。Spanner で `WithTTLGraceSeconds` を使うと設定エラーです。
+保持件数を省略するか `WithRetentionCount(NoRetention())` を渡すと、current snapshot だけを保存して履歴を作りません。`KeepLatest(n)` は `n >= 1` を要求し、current snapshot は件数に含めません。Memory と SQLite は削除方式だけ、DynamoDB は `RetentionDelete`（既定）と `RetentionTTL` に対応します。`WithTTLGraceSeconds` は0以上の猶予秒を指定します。Spanner も `RetentionDelete`（既定）と `RetentionTTL` に対応し、期限切れ方式の猶予は `Config.TTLGraceDays`（日数）で指定します。Spanner で `WithTTLGraceSeconds` に 0 以外を渡すと設定エラーです。
 
 保持処理は snapshot と履歴の確定後に同期で行います。失敗はログに記録され、`WithRetentionFailureHandler(func(context.Context, error))` でも通知できます。確定済み書込は成功のまま返ります。
 

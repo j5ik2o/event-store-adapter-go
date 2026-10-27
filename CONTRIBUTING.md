@@ -21,7 +21,7 @@ Some files in this repository are copies of shared data, and CI checks them agai
 
 ## Local setup
 
-- Go: `go.mod` declares `go 1.25.0` and `toolchain go1.27.3`. CI uses Go 1.27 (`actions/setup-go`).
+- Go: `go.mod` declares `go 1.26.0` and `toolchain go1.27.3`. CI uses Go 1.27 (`actions/setup-go`).
 - Python 3: CI uses Python 3.15 to run the scripts under `tools/` and the tests under `.github/`. `tools/user-docs/check.py` requires Python 3.10 or later.
 - Docker: `make test` runs `./...`, which includes the tests in `internal/dynamodbtest`. They start DynamoDB Local in a container with testcontainers-go. The conformance runner for DynamoDB also uses a DynamoDB Local container. The SQLite tests (`sqlite/` and the SQLite part of the conformance runner) need no container: they use SQLite files in temporary directories and the pure Go driver `modernc.org/sqlite`, so no cgo or emulator is required. The Spanner tests (`spanner/`, `internal/spannertest` and the Spanner part of the conformance runner) start the Cloud Spanner emulator in a container with testcontainers-go. The image is pinned by digest in `internal/spannertest/environment.go`. A test never skips when the emulator does not start: it fails.
 - Download the dependencies with `make prepare` (`go mod download`).
