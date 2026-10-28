@@ -1,11 +1,13 @@
 # event-store-adapter-go
 
-[![CI](https://github.com/j5ik2o/event-store-adapter-go/actions/workflows/ci.yml/badge.svg)](https://github.com/j5ik2o/event-store-adapter-go/actions/workflows/ci.yml)
-[![Go project version](https://badge.fury.io/go/github.com%2Fj5ik2o%2Fevent-store-adapter-go.svg)](https://badge.fury.io/go/github.com%2Fj5ik2o%2Fevent-store-adapter-go)
+[![CI](https://github.com/j5ik2o/event-store-adapter-go/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/j5ik2o/event-store-adapter-go/actions/workflows/ci.yml?query=branch%3Amain)
+[![Go module](https://img.shields.io/github/v/tag/j5ik2o/event-store-adapter-go?sort=semver&label=go%20module)](https://pkg.go.dev/github.com/j5ik2o/event-store-adapter-go/v5)
+[![Go Reference](https://pkg.go.dev/badge/github.com/j5ik2o/event-store-adapter-go/v5.svg)](https://pkg.go.dev/github.com/j5ik2o/event-store-adapter-go/v5)
+[![Go](https://img.shields.io/github/go-mod/go-version/j5ik2o/event-store-adapter-go.svg)](https://github.com/j5ik2o/event-store-adapter-go/blob/main/go.mod)
+[![Contract v5](https://img.shields.io/badge/contract-v5-blueviolet.svg)](https://github.com/j5ik2o/event-store-adapter/tree/contract-v5/docs/spec)
+[![Storages](https://img.shields.io/badge/storages-memory%20%7C%20DynamoDB%20%7C%20SQLite%20%7C%20Spanner%20%7C%20Bigtable-informational.svg)](https://github.com/j5ik2o/event-store-adapter/tree/main/docs/spec/storage)
 [![Renovate](https://img.shields.io/badge/renovate-enabled-brightgreen.svg)](https://renovatebot.com)
-[![License](https://img.shields.io/badge/License-APACHE2.0-blue.svg)](https://opensource.org/licenses/apache-2-0)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![](https://tokei.rs/b1/github/j5ik2o/event-store-adapter-go)](https://github.com/XAMPPRocky/tokei)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](https://github.com/j5ik2o/event-store-adapter-go#license)
 
 ## Overview
 
@@ -279,4 +281,4 @@ The `conformance` job in CI runs `go test -count=1 -v ./internal/conformance/...
 
 ## License
 
-MIT License. See [LICENSE-MIT](LICENSE-MIT) for details. The repository also contains the Apache License 2.0 text in [LICENSE-APACHE](LICENSE-APACHE).
+Dual-licensed under MIT or Apache-2.0 (`MIT OR Apache-2.0`), at your option. See [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE).
