@@ -3,7 +3,7 @@ package conformance
 import (
 	"fmt"
 
-	"github.com/dlclark/regexp2"
+	"github.com/dlclark/regexp2/v2"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
