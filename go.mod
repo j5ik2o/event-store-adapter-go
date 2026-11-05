@@ -10,7 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.47.5
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.13
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.72.3
-	github.com/aws/smithy-go v1.28.7
+	github.com/aws/smithy-go v1.28.8
 	github.com/containerd/errdefs v1.0.0
 	github.com/dlclark/regexp2 v1.12.0
 	github.com/moby/moby/client v0.6.2
