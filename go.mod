@@ -12,7 +12,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.73.0
 	github.com/aws/smithy-go v1.28.8
 	github.com/containerd/errdefs v1.0.0
-	github.com/dlclark/regexp2 v1.12.0
+	github.com/dlclark/regexp2 v1.11.0
+	github.com/dlclark/regexp2/v2 v2.12.0
 	github.com/moby/moby/client v0.6.2
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/stretchr/testify v1.12.1
