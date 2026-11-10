@@ -17,7 +17,7 @@ func TestLoadRequired(t *testing.T) {
 		require.NoError(t, err)
 		assert.Len(t, req, 5)
 		assert.Len(t, req["memory"], 67)
-		assert.Len(t, req["dynamodb"], 106)
+		assert.Len(t, req["dynamodb"], 110)
 		assert.Len(t, req["sqlite"], 68)
 		assert.Len(t, req["spanner"], 79)
 		assert.Len(t, req["bigtable"], 87)

@@ -189,7 +189,7 @@ func TestConformanceSetupFailureReport(t *testing.T) {
 			require.Contains(t, report.Errors, "bigtable setup: "+bigtableCause.Error())
 			require.True(t, report.Manifest.Verified)
 			require.Len(t, report.Required.Lists["memory"], 67)
-			require.Len(t, report.Required.Lists["dynamodb"], 106)
+			require.Len(t, report.Required.Lists["dynamodb"], 110)
 			require.Len(t, report.Required.Lists["sqlite"], 68)
 			require.Len(t, report.Required.Lists["spanner"], 79)
 			require.Len(t, report.Required.Lists["bigtable"], 87)

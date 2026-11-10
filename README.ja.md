@@ -279,7 +279,7 @@ serializer が返したエラーは `SerializationError`（`KindSerialization`�
 
 ## 適合
 
-`conformance/` に共通の適合テストデータ（版 `1.3.0`、[conformance/README.md](conformance/README.md) を参照）を置いています。CI の `lint` ジョブが `tools/conformance/manifest.py verify` と SHA-256 で照合します。
+`conformance/` に共通の適合テストデータ（版 `1.4.0`、[conformance/README.md](conformance/README.md) を参照）を置いています。CI の `lint` ジョブが `tools/conformance/manifest.py verify` と SHA-256 で照合します。
 
 CI の `conformance` ジョブは、`CONFORMANCE_REPORT` を設定して `go test -count=1 -v ./internal/conformance/...` を実行し、`conformance-report.json` を成果物として上げます。実行器は Memory、DynamoDB、SQLite、Spanner、Bigtable の保存先を対象とし、DynamoDB は DynamoDB Local、Spanner は Cloud Spanner エミュレーター、Bigtable は Cloud Bigtable エミュレーターをそれぞれコンテナで起動して使い、SQLite はローカルのファイルを使います。実行されなかった SQLite・Spanner・Bigtable の必須ケースがあると、ジョブは失敗します。`CONFORMANCE_REPORT` がなければ、この試験は飛ばされます。
 
