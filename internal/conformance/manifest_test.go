@@ -48,7 +48,7 @@ func TestVerifyManifest(t *testing.T) {
 
 	t.Run("a changed manifest version is a mismatch", func(t *testing.T) {
 		root := copyTree(t)
-		replaceInFile(t, filepath.Join(root, "manifest.json"), `"version": "1.4.0"`, `"version": "9.9.9"`)
+		replaceInFile(t, filepath.Join(root, "manifest.json"), `"version": "1.5.0"`, `"version": "9.9.9"`)
 		r, err := VerifyManifest(root)
 		require.NoError(t, err)
 		assert.False(t, r.Verified)
