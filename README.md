@@ -275,7 +275,7 @@ See [DYNAMODB_DATABASE_SCHEMA.md](docs/DYNAMODB_DATABASE_SCHEMA.md) for attribut
 
 ## Conformance
 
-The `conformance/` directory holds the shared conformance data (version `1.4.0`, see [conformance/README.md](conformance/README.md)). The `lint` job in CI verifies it with `tools/conformance/manifest.py verify` and SHA-256 checks.
+The `conformance/` directory holds the shared conformance data (version `1.5.0`, see [conformance/README.md](conformance/README.md)). The `lint` job in CI verifies it with `tools/conformance/manifest.py verify` and SHA-256 checks.
 
 The `conformance` job in CI runs `go test -count=1 -v ./internal/conformance/...` with `CONFORMANCE_REPORT` set, and uploads `conformance-report.json` as an artifact. The runner covers the Memory, DynamoDB, SQLite, Spanner and Bigtable storages; DynamoDB uses DynamoDB Local, Spanner uses the Cloud Spanner emulator and Bigtable uses the Cloud Bigtable emulator, each started in a container, and SQLite uses local files. A required SQLite, Spanner or Bigtable case that is not executed fails the job. Without `CONFORMANCE_REPORT`, the test is skipped.
 

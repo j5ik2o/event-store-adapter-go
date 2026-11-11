@@ -46,14 +46,14 @@ func TestLoadData(t *testing.T) {
 
 	t.Run("wrong version is rejected", func(t *testing.T) {
 		root := copyTree(t)
-		replaceInFile(t, filepath.Join(root, "values", "hash.json"), `"version": "1.4.0"`, `"version": "2.0.0"`)
+		replaceInFile(t, filepath.Join(root, "values", "hash.json"), `"version": "1.5.0"`, `"version": "2.0.0"`)
 		_, err := LoadData(root)
 		assert.Error(t, err)
 	})
 
 	t.Run("json file without a known format mapping is rejected", func(t *testing.T) {
 		root := copyTree(t)
-		require.NoError(t, os.WriteFile(filepath.Join(root, "extra.json"), []byte(`{"format":"values","version":"1.4.0"}`), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "extra.json"), []byte(`{"format":"values","version":"1.5.0"}`), 0o644))
 		_, err := LoadData(root)
 		assert.Error(t, err)
 	})
