@@ -1,0 +1,157 @@
+{
+  "engines": [
+    "format",
+    "lint",
+    "code-quality",
+    "ai-slop",
+    "security"
+  ],
+  "missingToolsAllowed": {
+    "ruff": "Python のリンタで、この Go リポジトリの開発環境と CI には導入していない。format と lint エンジンは ruff 無しでも動作する。",
+    "golangci-lint": "Go の複合リンタで、この環境と CI には導入していない（lint ジョブは make vet と staticcheck を使う）。lint エンジンは golangci-lint 無しでも動作する。"
+  },
+  "accepted": [
+    {
+      "reason": "既存コードの複雑度（関数の長さ・引数の数・ファイルの大きさ）が aislop のしきい値を超えている。この組み込みでは既存コードを修正しないため受け入れる。",
+      "findings": [
+        {
+          "engine": "code-quality",
+          "rule": "complexity/function-too-long",
+          "file": "bigtable/persist_event.go",
+          "message": "Function too long (limit: 80, flagged above 88 lines)"
+        },
+        {
+          "engine": "code-quality",
+          "rule": "complexity/too-many-params",
+          "file": "bigtable/persist_event.go",
+          "message": "Function has too many parameters (max: 6)"
+        },
+        {
+          "engine": "code-quality",
+          "rule": "complexity/function-too-long",
+          "file": "internal/apisurface/check.go",
+          "message": "Function too long (limit: 80, flagged above 88 lines)"
+        },
+        {
+          "engine": "code-quality",
+          "rule": "complexity/function-too-long",
+          "file": "internal/conformance/manifest.go",
+          "message": "Function too long (limit: 80, flagged above 88 lines)"
+        },
+        {
+          "engine": "code-quality",
+          "rule": "complexity/function-too-long",
+          "file": "internal/conformance/observation.go",
+          "message": "Function too long (limit: 80, flagged above 88 lines)"
+        },
+        {
+          "engine": "code-quality",
+          "rule": "complexity/too-many-params",
+          "file": "internal/conformance/observation.go",
+          "message": "Function has too many parameters (max: 6)"
+        },
+        {
+          "engine": "code-quality",
+          "rule": "complexity/file-too-large",
+          "file": "internal/conformance/scenario.go",
+          "message": "File too large (limit: 600, flagged above 660 lines)"
+        },
+        {
+          "engine": "code-quality",
+          "rule": "complexity/function-too-long",
+          "file": "internal/conformance/scenario.go",
+          "message": "Function too long (limit: 80, flagged above 88 lines)"
+        },
+        {
+          "engine": "code-quality",
+          "rule": "complexity/function-too-long",
+          "file": "internal/conformance/scenario_runner.go",
+          "message": "Function too long (limit: 80, flagged above 88 lines)"
+        },
+        {
+          "engine": "code-quality",
+          "rule": "complexity/function-too-long",
+          "file": "internal/dynamodbtest/request_observation.go",
+          "message": "Function too long (limit: 80, flagged above 88 lines)"
+        },
+        {
+          "engine": "code-quality",
+          "rule": "complexity/function-too-long",
+          "file": "internal/dynamodbtest/retention.go",
+          "message": "Function too long (limit: 80, flagged above 88 lines)"
+        },
+        {
+          "engine": "code-quality",
+          "rule": "complexity/function-too-long",
+          "file": "spanner/layout.go",
+          "message": "Function too long (limit: 80, flagged above 88 lines)"
+        },
+        {
+          "engine": "code-quality",
+          "rule": "complexity/function-too-long",
+          "file": "spanner/layout.go",
+          "message": "Function too long (limit: 80, flagged above 88 lines)"
+        },
+        {
+          "engine": "code-quality",
+          "rule": "complexity/file-too-large",
+          "file": "tools/user-docs/check.py",
+          "message": "File too large (limit: 400, flagged above 441 lines)"
+        },
+        {
+          "engine": "code-quality",
+          "rule": "complexity/function-too-long",
+          "file": "tools/user-docs/check.py",
+          "message": "Function too long (limit: 80, flagged above 88 lines)"
+        }
+      ]
+    },
+    {
+      "reason": "既存コードの装飾的な区切りコメントや節見出しコメントを ai-slop/narrative-comment が検出している。この組み込みでは既存コードを修正しないため受け入れる。",
+      "findings": [
+        {
+          "engine": "ai-slop",
+          "rule": "ai-slop/narrative-comment",
+          "file": ".github/create-release-note-body.py",
+          "message": "Narrative comment block (decorative separator)"
+        },
+        {
+          "engine": "ai-slop",
+          "rule": "ai-slop/narrative-comment",
+          "file": ".github/create-release-note-header.py",
+          "message": "Narrative comment block (decorative separator)"
+        },
+        {
+          "engine": "ai-slop",
+          "rule": "ai-slop/narrative-comment",
+          "file": ".github/next-semver.py",
+          "message": "Narrative comment block (decorative separator)"
+        },
+        {
+          "engine": "ai-slop",
+          "rule": "ai-slop/narrative-comment",
+          "file": "bigtable/persist_event.go",
+          "message": "Narrative comment block (phase/section header)"
+        },
+        {
+          "engine": "ai-slop",
+          "rule": "ai-slop/narrative-comment",
+          "file": "bigtable/persist_event.go",
+          "message": "Narrative comment block (phase/section header)"
+        },
+        {
+          "engine": "ai-slop",
+          "rule": "ai-slop/narrative-comment",
+          "file": "bigtable/persist_event.go",
+          "message": "Narrative comment block (phase/section header)"
+        },
+        {
+          "engine": "ai-slop",
+          "rule": "ai-slop/narrative-comment",
+          "file": "internal/conformance/doc.go",
+          "message": "Narrative comment block (justification prose)"
+        }
+      ]
+    }
+  ]
+}
