@@ -32,3 +32,6 @@ ehthumbs_vista.db
 
 .vscode/*
 !.vscode/settings.json
+
+# Node.js dependencies (aislop tooling)
+node_modules/
